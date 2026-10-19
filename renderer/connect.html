@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:">
+  <title>اتصال به سرور کلینیک</title>
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/clinic.css">
+</head>
+<body>
+  <div id="login">
+    <div class="loginCard" style="width:min(520px,94vw)">
+      <div class="loginTop"><div class="loginLogo"><img src="img/logo.png" alt=""></div><div><h1>اتصال به سرور کلینیک</h1><div class="stationBadge" id="st"></div></div></div>
+      <p>این کمپیوتر باید به کمپیوتر مدیر (سرور) در شبکه WiFi / LAN وصل شود. سرور به‌صورت خودکار جستجو می‌شود.</p>
+      <div class="warnBox hidden" id="msg"></div>
+      <div class="secTitle">سرورهای پیدا شده در شبکه</div>
+      <div id="list" class="selList" style="margin-bottom:14px"><div class="empty" style="padding:14px">در حال جستجو…</div></div>
+      <label class="field"><span>یا آدرس سرور را وارد کنید (IP کمپیوتر مدیر)</span><input id="url" class="ltr" placeholder="192.168.1.10:8750"></label>
+      <button class="btn primary" id="go" style="margin-top:10px">اتصال</button>
+      <div class="loginErr" id="err"></div>
+      <div class="loginHint">آدرس سرور در برنامه مدیر، صفحه «شبکه و ایستگاه‌ها» نوشته شده است.</div>
+    </div>
+  </div>
+  <script src="js/connect.js"></script>
+</body>
+</html>

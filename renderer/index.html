@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; connect-src 'self'">
+  <title>سیستم جامع کلینیک</title>
+  <link rel="icon" href="img/logo.png">
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/clinic.css">
+</head>
+<body>
+  <!-- Login -->
+  <div id="login">
+    <form class="loginCard" id="loginForm" autocomplete="off">
+      <div class="loginTop">
+        <div class="loginLogo"><img src="img/logo.png" alt=""></div>
+        <div>
+          <h1 id="loginClinic">کلینیک OPD سلامت خانواده</h1>
+          <div class="stationBadge" id="loginStation"></div>
+        </div>
+      </div>
+      <p>سیستم جامع مدیریت کلینیک — برای ادامه وارد شوید</p>
+      <label class="field"><span>نام کاربری</span><input id="loginUser" autocomplete="username"></label>
+      <label class="field"><span>رمز عبور</span><input id="loginPass" type="password" autocomplete="current-password"></label>
+      <button class="btn primary" type="submit">ورود به سیستم</button>
+      <div class="loginErr" id="loginErr"></div>
+      <div class="loginHint" id="loginHint"></div>
+      <div class="loginServer" id="loginServer"></div>
+    </form>
+  </div>
+
+  <!-- Application shell -->
+  <div id="app" class="hidden">
+    <header id="topbar">
+      <div class="brand">
+        <div class="brandIcon"><img src="img/logo.png" alt=""></div>
+        <div><strong id="brandName">کلینیک</strong><small id="brandStation">—</small></div>
+      </div>
+      <div class="topSearch">
+        <input id="globalSearch" type="search" placeholder="جستجوی سریع: نام، کد مریض، کد نسخه یا لابراتوار، شماره تلفن… (Ctrl+K)">
+        <span id="gsIcon"></span>
+        <div class="dropdown hidden" id="globalResults"></div>
+      </div>
+      <div class="topRight">
+        <span class="netState off" id="netState" title="اتصال"><i></i><span>…</span></span>
+        <span class="clock" id="clock"></span>
+        <button class="topBtn" id="alertsBtn" title="هشدارها"><span id="alertsIcon"></span><i class="badge hidden" id="alertsBadge">0</i></button>
+        <div class="userChip" id="userChip" title="تغییر رمز"><div class="avatar" id="avatar">م</div><div><div id="userName">—</div><div class="small" style="opacity:.75" id="userRole"></div></div></div>
+        <button class="topBtn" id="logoutBtn">خروج</button>
+      </div>
+    </header>
+    <nav id="sidebar"></nav>
+    <main id="view"></main>
+  </div>
+
+  <div id="modals"></div>
+  <div id="toasts"></div>
+  <div id="printArea"></div>
+  <style id="pageStyle"></style>
+
+  <script src="vendor/chart.umd.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/barcode.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/print.js"></script>
+  <script src="js/pages/admin.js"></script>
+  <script src="js/pages/reception.js"></script>
+  <script src="js/pages/doctor.js"></script>
+  <script src="js/pages/pharmacy.js"></script>
+  <script src="js/pages/stock.js"></script>
+  <script src="js/pages/lab.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

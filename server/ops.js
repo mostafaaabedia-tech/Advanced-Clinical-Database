@@ -1,0 +1,804 @@
+// Domain operations — every multi-table change happens here inside one transaction.
+'use strict';
+
+const r2 = (x) => Math.round((Number(x) || 0) * 100) / 100;
+const n = (x, d = 0) => { const v = Number(x); return isFinite(v) ? v : d; };
+const str = (x) => (x === undefined || x === null) ? null : (String(x).trim() || null);
+const pad2 = (x) => String(x).padStart(2, '0');
+function today() { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+function nowStr() { const d = new Date(); return `${today()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; }
+function isoOk(s) { return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')); }
+class UserError extends Error { constructor(m) { super(m); this.user = true; } }
+const fail = (m) => { throw new UserError(m); };
+
+function birthFromAge(years, months, days) {
+  const d = new Date(); d.setHours(12, 0, 0, 0);
+  d.setFullYear(d.getFullYear() - n(years)); d.setMonth(d.getMonth() - n(months)); d.setDate(d.getDate() - n(days));
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function roundPrice(x) { const v = Number(x) || 0; return v >= 10 ? Math.ceil(v) : Math.round(v * 10) / 10; }
+
+function makeOps(db, bus) {
+  const emit = (type, data, roles, extra = {}) => bus && bus.emit({ type, data, roles, ...extra });
+  const setting = (k, d) => db.getSetting(k, d);
+
+  // =================================================================== patients
+  const PATIENT_FIELDS = ['full_name', 'father_name', 'sex', 'birth_date', 'phone', 'address', 'tazkira', 'blood_group', 'allergies', 'chronic_diseases',
+    'past_history', 'family_history', 'current_medications', 'notes'];
+  function savePatient(p, user) {
+    p = p || {};
+    const row = {};
+    for (const f of PATIENT_FIELDS) if (f in p) row[f] = str(p[f]);
+    if (p.age_years !== undefined || p.age_months !== undefined || p.age_days !== undefined) {
+      if (n(p.age_years) || n(p.age_months) || n(p.age_days)) row.birth_date = birthFromAge(p.age_years, p.age_months, p.age_days);
+    }
+    if (row.sex && !['M', 'F'].includes(row.sex)) row.sex = 'M';
+    if (p.id) {
+      if (!db.get('SELECT id FROM patients WHERE id=?', [p.id])) fail('مریض پیدا نشد');
+      if ('full_name' in row && !row.full_name) fail('نام مریض الزامی است');
+      row.updated_at = nowStr();
+      db.update('patients', p.id, row);
+      return p.id;
+    }
+    if (!row.full_name) fail('نام مریض الزامی است');
+    row.code = db.nextCode('patient');
+    row.sex = row.sex || 'M';
+    row.created_by = user?.id || null;
+    return db.insert('patients', row);
+  }
+
+  // =================================================================== reception
+  function queueKey(doctorId, serviceId) {
+    const scope = setting('turn_scope', 'doctor');
+    if (scope === 'clinic') return 'c';
+    if (scope === 'service') return 's' + (serviceId || 0);
+    return doctorId ? 'd' + doctorId : 's' + (serviceId || 0);
+  }
+  function nextTurn(date, key) { return n(db.scalar('SELECT MAX(turn_no) FROM visits WHERE visit_date=? AND queue_key=?', [date, key])) + 1; }
+
+  function createVisit(v, user) {
+    return db.transaction(() => {
+      let patientId = v.patient_id || v.patient?.id;
+      if (v.patient) patientId = savePatient({ ...v.patient, id: patientId || undefined }, user);
+      if (!patientId) fail('مریض را انتخاب یا ثبت کنید');
+      let service = v.service_id ? db.get('SELECT * FROM services WHERE id=?', [v.service_id]) : null;
+      let serviceName = service ? service.name : str(v.service_name);
+      if (!serviceName) fail('نوع خدمت را انتخاب کنید یا بنویسید');
+      if (!service && v.save_service) {
+        const code = (str(v.service_code) || serviceName).toUpperCase().replace(/\s+/g, '_').slice(0, 20);
+        const exists = db.get('SELECT * FROM services WHERE code=? OR name=?', [code, serviceName]);
+        if (exists) service = exists;
+        else { const id = db.insert('services', { code, name: serviceName, fee: n(v.fee), needs_doctor: v.doctor_id ? 1 : 0, sort: 99 }); service = db.get('SELECT * FROM services WHERE id=?', [id]); }
+      }
+      const doctorId = v.doctor_id ? Number(v.doctor_id) : null;
+      if (service && service.needs_doctor && !doctorId) fail('برای این خدمت، داکتر را انتخاب کنید');
+      const date = isoOk(v.visit_date) ? v.visit_date : today();
+      const reserved = !!v.reserve || date > today();
+      const key = queueKey(doctorId, service?.id);
+      const fee = n(v.fee, service ? service.fee : 0), discount = Math.min(fee, Math.max(0, n(v.discount)));
+      const net = r2(fee - discount);
+      const paid = v.paid === undefined || v.paid === null || v.paid === '' ? (reserved ? 0 : net) : Math.max(0, n(v.paid));
+      const id = db.insert('visits', {
+        visit_no: db.nextCode('visit'), patient_id: patientId, doctor_id: doctorId, service_id: service?.id || null, service_name: serviceName,
+        visit_date: date, reserved_time: str(v.reserved_time), queue_key: key, turn_no: nextTurn(date, key),
+        status: reserved ? 'reserved' : 'waiting', fee, discount, net, paid, pay_method: v.pay_method || 'cash',
+        age_text: str(v.age_text), weight: v.weight ? n(v.weight) : null, note: str(v.note), created_by: user?.id || null,
+        checked_in_at: reserved ? null : nowStr()
+      });
+      if (paid > 0) db.insert('visit_payments', { visit_id: id, amount: paid, method: v.pay_method || 'cash', note: 'پرداخت هنگام پذیرش', created_by: user?.id || null });
+      const row = db.get('SELECT * FROM v_visits WHERE id=?', [id]);
+      emit('visit:new', row, ['reception', 'doctor', 'admin'], { doctor_id: doctorId });
+      return row;
+    });
+  }
+  function updateVisit(id, v, user) {
+    return db.transaction(() => {
+      const old = db.get('SELECT * FROM visits WHERE id=?', [id]); if (!old) fail('پذیرش پیدا نشد');
+      const row = {};
+      if ('fee' in v) row.fee = Math.max(0, n(v.fee));
+      if ('discount' in v) row.discount = Math.max(0, n(v.discount));
+      if ('note' in v) row.note = str(v.note);
+      if ('reserved_time' in v) row.reserved_time = str(v.reserved_time);
+      if ('weight' in v) row.weight = v.weight ? n(v.weight) : null;
+      if ('doctor_id' in v || 'service_id' in v || 'visit_date' in v) {
+        const doctorId = 'doctor_id' in v ? (v.doctor_id ? Number(v.doctor_id) : null) : old.doctor_id;
+        const serviceId = 'service_id' in v ? (v.service_id ? Number(v.service_id) : null) : old.service_id;
+        const date = isoOk(v.visit_date) ? v.visit_date : old.visit_date;
+        const key = queueKey(doctorId, serviceId);
+        Object.assign(row, { doctor_id: doctorId, service_id: serviceId, visit_date: date });
+        if (key !== old.queue_key || date !== old.visit_date) Object.assign(row, { queue_key: key, turn_no: nextTurn(date, key) });
+        if (serviceId && serviceId !== old.service_id) row.service_name = db.scalar('SELECT name FROM services WHERE id=?', [serviceId]) || old.service_name;
+      }
+      if ('service_name' in v && !row.service_id && !old.service_id) row.service_name = str(v.service_name) || old.service_name;
+      const fee = row.fee ?? old.fee, disc = row.discount ?? old.discount;
+      row.net = r2(Math.max(0, fee - disc - old.doctor_discount));
+      db.update('visits', id, row);
+      const out = db.get('SELECT * FROM v_visits WHERE id=?', [id]);
+      emit('visit:update', out, ['reception', 'doctor', 'admin'], { doctor_id: out.doctor_id });
+      return out;
+    });
+  }
+  function setVisitStatus(id, status, user, reason) {
+    const allowed = ['reserved', 'waiting', 'in_visit', 'done', 'cancelled', 'no_show'];
+    if (!allowed.includes(status)) fail('وضعیت نامعتبر');
+    const old = db.get('SELECT * FROM visits WHERE id=?', [id]); if (!old) fail('پذیرش پیدا نشد');
+    const row = { status };
+    if (status === 'waiting' && !old.checked_in_at) row.checked_in_at = nowStr();
+    if (status === 'waiting' && old.status === 'reserved' && old.visit_date !== today()) {
+      // reservation arriving on another day: move it to today with a new turn
+      const key = old.queue_key; row.visit_date = today(); row.turn_no = nextTurn(today(), key);
+    }
+    if (status === 'in_visit') row.called_at = nowStr();
+    if (status === 'done') row.finished_at = nowStr();
+    if (status === 'cancelled') row.cancelled_reason = str(reason);
+    db.update('visits', id, row);
+    const out = db.get('SELECT * FROM v_visits WHERE id=?', [id]);
+    emit('visit:update', out, ['reception', 'doctor', 'admin'], { doctor_id: out.doctor_id });
+    return out;
+  }
+  function payVisit(id, amount, method, note, user) {
+    return db.transaction(() => {
+      const v = db.get('SELECT * FROM visits WHERE id=?', [id]); if (!v) fail('پذیرش پیدا نشد');
+      const a = r2(amount); if (!a) fail('مبلغ را وارد کنید');
+      db.insert('visit_payments', { visit_id: id, amount: a, method: method || 'cash', note: str(note), created_by: user?.id || null });
+      db.update('visits', id, { paid: r2(v.paid + a) });
+      const out = db.get('SELECT * FROM v_visits WHERE id=?', [id]);
+      emit('visit:update', out, ['reception', 'admin'], { doctor_id: out.doctor_id });
+      return out;
+    });
+  }
+
+  // =================================================================== doctor
+  function patientFile(patientId) {
+    const patient = db.get('SELECT * FROM patients WHERE id=?', [patientId]); if (!patient) fail('مریض پیدا نشد');
+    const visits = db.all('SELECT * FROM v_visits WHERE patient_id=? ORDER BY visit_date DESC, id DESC LIMIT 100', [patientId]);
+    const encounters = db.all(`SELECT e.*, d.name doctor_name, d.title doctor_title FROM encounters e LEFT JOIN doctors d ON d.id=e.doctor_id
+      WHERE e.patient_id=? ORDER BY e.date DESC, e.id DESC LIMIT 100`, [patientId]);
+    const rx = db.all('SELECT * FROM v_prescriptions WHERE patient_id=? ORDER BY id DESC LIMIT 100', [patientId]);
+    const rxItems = rx.length ? db.all(`SELECT * FROM prescription_items WHERE prescription_id IN (${rx.map(r => r.id).join(',')}) ORDER BY sort, id`) : [];
+    rx.forEach(r => r.items = rxItems.filter(i => i.prescription_id === r.id));
+    const labs = labRequestsFull(db.all('SELECT * FROM v_lab_requests WHERE patient_id=? ORDER BY id DESC LIMIT 100', [patientId]));
+    return { patient, visits, encounters, prescriptions: rx, labs };
+  }
+  function labRequestsFull(reqs) {
+    if (!reqs.length) return reqs;
+    const ids = reqs.map(r => r.id).join(',');
+    const items = db.all(`SELECT i.*, t.code, t.is_panel FROM lab_request_items i JOIN lab_tests t ON t.id=i.test_id WHERE i.request_id IN (${ids}) ORDER BY i.sort, i.id`);
+    const results = db.all(`SELECT r.*, t.code, t.name, t.result_type, t.unit tunit FROM lab_results r JOIN lab_tests t ON t.id=r.test_id WHERE r.request_id IN (${ids})`);
+    reqs.forEach(r => { r.items = items.filter(i => i.request_id === r.id); r.results = results.filter(x => x.request_id === r.id); });
+    return reqs;
+  }
+
+  const ENC_FIELDS = ['bp_sys', 'bp_dia', 'pulse', 'resp_rate', 'temp', 'weight', 'height', 'spo2', 'blood_sugar', 'head_circ',
+    'complaint', 'history', 'exam', 'diagnosis', 'impression', 'notes', 'private_notes', 'print_note', 'next_visit'];
+  const NUMERIC_ENC = new Set(['bp_sys', 'bp_dia', 'pulse', 'resp_rate', 'temp', 'weight', 'height', 'spo2', 'blood_sugar', 'head_circ']);
+  const RX_ITEM_FIELDS = ['medicine_id', 'name', 'form', 'strength', 'unit', 'dose', 'frequency', 'timing', 'route', 'duration', 'duration_unit', 'qty', 'note'];
+  const rxSig = (items) => JSON.stringify((items || []).map(i => RX_ITEM_FIELDS.map(f => i[f] == null || i[f] === '' ? null : String(i[f]))));
+
+  function saveEncounter(p, user) {
+    const result = db.transaction(() => {
+      const visit = p.visit_id ? db.get('SELECT * FROM visits WHERE id=?', [p.visit_id]) : null;
+      const patientId = Number(p.patient_id || visit?.patient_id); if (!patientId) fail('مریض مشخص نیست');
+      if (!db.get('SELECT id FROM patients WHERE id=?', [patientId])) fail('مریض پیدا نشد');
+      const doctorId = user.role === 'doctor' ? (user.doctor_id || visit?.doctor_id || null) : (p.doctor_id || visit?.doctor_id || user.doctor_id || null);
+      if (p.patient_update) savePatient({ ...p.patient_update, id: patientId }, user);
+
+      const enc = {};
+      for (const f of ENC_FIELDS) if (f in p) enc[f] = NUMERIC_ENC.has(f) ? (p[f] === '' || p[f] == null ? null : n(p[f])) : str(p[f]);
+      if ('print_opts' in p) enc.print_opts = JSON.stringify(p.print_opts || {});
+      let encId = p.id ? Number(p.id) : (visit ? db.scalar('SELECT id FROM encounters WHERE visit_id=? ORDER BY id DESC LIMIT 1', [visit.id]) : null);
+      if (encId) {
+        const old = db.get('SELECT * FROM encounters WHERE id=?', [encId]); if (!old) fail('ویزیت پیدا نشد');
+        if (user.role === 'doctor' && old.doctor_id && user.doctor_id && old.doctor_id !== user.doctor_id) fail('این ویزیت مربوط به داکتر دیگری است');
+        db.update('encounters', encId, { ...enc, updated_at: nowStr() });
+      } else {
+        encId = db.insert('encounters', { ...enc, visit_id: visit?.id || null, patient_id: patientId, doctor_id: doctorId, date: today(), created_by: user.id });
+      }
+      if (enc.weight && visit) db.update('visits', visit.id, { weight: enc.weight });
+
+      // ---- prescription (pharmacy code) ----
+      let rxOut = null;
+      if (p.rx) {
+        const items = (p.rx.items || []).filter(i => str(i.name));
+        const existing = db.get('SELECT * FROM prescriptions WHERE encounter_id=? ORDER BY id DESC LIMIT 1', [encId]);
+        const oldItems = existing ? db.all('SELECT * FROM prescription_items WHERE prescription_id=? ORDER BY sort, id', [existing.id]) : [];
+        const changed = rxSig(items) !== rxSig(oldItems);
+        if (existing && existing.status !== 'new' && existing.status !== 'cancelled') {
+          if (changed) fail(`نسخه ${existing.rx_code} قبلاً توسط دواخانه تحویل شده و قابل تغییر نیست. برای دوای جدید، نسخه جدید بنویسید.`);
+          db.update('prescriptions', existing.id, { note: str(p.rx.note) });
+          rxOut = existing;
+        } else if (!items.length) {
+          if (existing) { db.run('DELETE FROM prescriptions WHERE id=?', [existing.id]); emit('rx:update', { id: existing.id, rx_code: existing.rx_code, status: 'deleted' }, ['pharmacy', 'admin']); }
+        } else {
+          let rxId;
+          const head = { note: str(p.rx.note), discount_pct: Math.min(100, Math.max(0, n(p.rx.discount_pct))), doctor_id: doctorId, updated_at: nowStr() };
+          if (existing) { rxId = existing.id; db.update('prescriptions', rxId, { ...head, status: 'new' }); db.run('DELETE FROM prescription_items WHERE prescription_id=?', [rxId]); }
+          else rxId = db.insert('prescriptions', { ...head, rx_code: db.nextCode('rx'), encounter_id: encId, patient_id: patientId, date: today(), sent_at: nowStr(), created_by: user.id });
+          items.forEach((it, i) => {
+            const row = { prescription_id: rxId, sort: i + 1 };
+            for (const f of RX_ITEM_FIELDS) row[f] = ['medicine_id', 'duration', 'qty'].includes(f) ? (it[f] === '' || it[f] == null ? null : n(it[f])) : str(it[f]);
+            if (row.medicine_id && !db.get('SELECT id FROM medicines WHERE id=?', [row.medicine_id])) row.medicine_id = null;
+            db.insert('prescription_items', row);
+          });
+          rxOut = db.get('SELECT * FROM v_prescriptions WHERE id=?', [rxId]);
+          if (!existing || changed) emit(existing ? 'rx:update' : 'rx:new', rxOut, ['pharmacy', 'admin', 'stock']);
+        }
+      }
+
+      // ---- laboratory request (lab code) ----
+      let labOut = null;
+      if (p.lab) {
+        const ids = [...new Set((p.lab.test_ids || []).map(Number).filter(Boolean))];
+        const existing = db.get("SELECT * FROM lab_requests WHERE encounter_id=? AND status<>'cancelled' ORDER BY id DESC LIMIT 1", [encId]);
+        const oldIds = existing ? db.all('SELECT test_id FROM lab_request_items WHERE request_id=? ORDER BY sort, id', [existing.id]).map(r => r.test_id) : [];
+        const changed = JSON.stringify(ids) !== JSON.stringify(oldIds);
+        if (existing && existing.status !== 'requested') {
+          if (changed) fail(`درخواست آزمایش ${existing.lab_code} قبلاً در لابراتوار پذیرش شده و قابل تغییر نیست.`);
+          labOut = existing;
+        } else if (!ids.length) {
+          if (existing) { db.run('DELETE FROM lab_requests WHERE id=?', [existing.id]); emit('lab:update', { id: existing.id, lab_code: existing.lab_code, status: 'deleted' }, ['lab', 'admin']); }
+        } else {
+          const head = { note: str(p.lab.note), urgent: p.lab.urgent ? 1 : 0, discount_pct: Math.min(100, Math.max(0, n(p.lab.discount_pct))), doctor_id: doctorId };
+          let reqId;
+          if (existing) { reqId = existing.id; db.update('lab_requests', reqId, head); }
+          else reqId = db.insert('lab_requests', { ...head, lab_code: db.nextCode('lab'), encounter_id: encId, patient_id: patientId, date: today(), created_by: user.id });
+          setLabItems(reqId, ids);
+          labOut = db.get('SELECT * FROM v_lab_requests WHERE id=?', [reqId]);
+          if (!existing || changed) emit(existing ? 'lab:update' : 'lab:new', labOut, ['lab', 'admin']);
+        }
+      }
+
+      // ---- doctor discount on the visit fee ----
+      if (visit && 'visit_discount' in p) {
+        const dd = Math.max(0, Math.min(visit.fee - visit.discount, n(p.visit_discount)));
+        db.update('visits', visit.id, { doctor_discount: dd, doctor_discount_note: str(p.visit_discount_note), net: r2(visit.fee - visit.discount - dd) });
+      }
+      if (visit && p.finish) db.update('visits', visit.id, { status: 'done', finished_at: nowStr() });
+      else if (visit && visit.status === 'waiting') db.update('visits', visit.id, { status: 'in_visit', called_at: visit.called_at || nowStr() });
+      if (visit) { const v = db.get('SELECT * FROM v_visits WHERE id=?', [visit.id]); emit('visit:update', v, ['reception', 'doctor', 'admin'], { doctor_id: v.doctor_id }); }
+
+      return { encounter_id: encId, rx: rxOut ? { id: rxOut.id, rx_code: rxOut.rx_code, status: rxOut.status } : null, lab: labOut ? { id: labOut.id, lab_code: labOut.lab_code, status: labOut.status } : null };
+    });
+    return result;
+  }
+
+  // =================================================================== pharmacy
+  function findByCode(table, col, code) {
+    const c = String(code || '').trim(); if (!c) return null;
+    let row = db.get(`SELECT * FROM ${table} WHERE ${col} = ? COLLATE NOCASE`, [c]);
+    if (!row && /^\d+$/.test(c)) row = db.get(`SELECT * FROM ${table} WHERE CAST(SUBSTR(${col}, LENGTH(RTRIM(${col}, '0123456789')) + 1) AS INTEGER) = ? ORDER BY id DESC LIMIT 1`, [Number(c)]);
+    return row;
+  }
+  function medicineStock(id) { return db.get('SELECT * FROM v_medicine_stock WHERE id=?', [id]); }
+  function matchMedicine(item) {
+    if (item.medicine_id) { const m = medicineStock(item.medicine_id); if (m) return m; }
+    const name = String(item.name || '').trim(); if (!name) return null;
+    return db.get('SELECT * FROM v_medicine_stock WHERE active=1 AND name = ? COLLATE NOCASE ORDER BY stock DESC LIMIT 1', [name])
+      || db.get('SELECT * FROM v_medicine_stock WHERE active=1 AND (name LIKE ? OR generic LIKE ?) ORDER BY stock DESC LIMIT 1', [name + '%', name + '%']);
+  }
+  function getRx(code) {
+    const rx0 = findByCode('prescriptions', 'rx_code', code); if (!rx0) fail('نسخه با این کد پیدا نشد');
+    const rx = db.get('SELECT * FROM v_prescriptions WHERE id=?', [rx0.id]);
+    rx.items = db.all('SELECT * FROM prescription_items WHERE prescription_id=? ORDER BY sort, id', [rx.id]);
+    const dispensed = {};
+    db.all(`SELECT si.rx_item_id, SUM(si.qty - si.returned_qty) q FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE s.prescription_id=? AND s.status<>'void' GROUP BY si.rx_item_id`, [rx.id])
+      .forEach(r => dispensed[r.rx_item_id] = r.q);
+    rx.items.forEach(i => { i.match = matchMedicine(i); i.dispensed = dispensed[i.id] || 0; });
+    rx.sales = db.all('SELECT * FROM v_sales WHERE prescription_id=? ORDER BY id DESC', [rx.id]);
+    rx.patient = db.get('SELECT * FROM patients WHERE id=?', [rx.patient_id]);
+    return rx;
+  }
+
+  function allocate(medicineId, qty) {
+    const batches = db.all("SELECT * FROM batches WHERE medicine_id=? AND qty_left > 0 ORDER BY (expiry IS NULL OR expiry=''), expiry, id", [medicineId]);
+    const alloc = []; let left = qty, cost = 0;
+    for (const b of batches) {
+      if (left <= 0) break;
+      const take = Math.min(left, b.qty_left);
+      alloc.push([b.id, take, b.buy_price]); cost += take * b.buy_price; left = r2(left - take);
+    }
+    return { alloc, cost, missing: left };
+  }
+
+  function createSale(s, user) {
+    return db.transaction(() => {
+      const items = (s.items || []).filter(i => n(i.qty) > 0);
+      if (!items.length) fail('هیچ دوایی برای فروش انتخاب نشده');
+      const allowNeg = setting('allow_negative_stock', '0') === '1';
+      let rx = null;
+      if (s.prescription_id) { rx = db.get('SELECT * FROM prescriptions WHERE id=?', [s.prescription_id]); if (!rx) fail('نسخه پیدا نشد'); if (rx.status === 'cancelled') fail('این نسخه لغو شده است'); }
+      const lines = []; let subtotal = 0, costTotal = 0;
+      for (const it of items) {
+        const m = medicineStock(it.medicine_id); if (!m) fail('دوا پیدا نشد: ' + (it.name || it.medicine_id));
+        const qty = n(it.qty);
+        const price = it.price === undefined || it.price === null || it.price === '' ? m.sell_price : n(it.price);
+        const { alloc, cost, missing } = allocate(m.id, qty);
+        if (missing > 0 && !allowNeg) fail(`موجودی کافی نیست: ${m.name} (موجود ${r2(m.stock)} ${m.unit || ''}، درخواست ${qty})`);
+        const lineCost = cost + missing * (m.buy_price || 0);
+        const total = r2(qty * price);
+        lines.push({ m, it, qty, price, total, alloc, lineCost: r2(lineCost) });
+        subtotal += total; costTotal += lineCost;
+      }
+      subtotal = r2(subtotal);
+      const pct = Math.min(100, Math.max(0, n(s.discount_pct)));
+      const discount = s.discount !== undefined && s.discount !== '' && s.discount !== null ? Math.min(subtotal, Math.max(0, n(s.discount))) : r2(subtotal * pct / 100);
+      const net = r2(subtotal - discount);
+      const paid = s.paid === undefined || s.paid === null || s.paid === '' ? net : Math.max(0, n(s.paid));
+      const date = today();
+      const saleId = db.insert('sales', {
+        sale_code: db.nextCode('sale'), prescription_id: rx?.id || null, rx_code: rx?.rx_code || null,
+        patient_id: rx?.patient_id || s.patient_id || null, patient_name: str(s.patient_name) || (rx ? db.scalar('SELECT full_name FROM patients WHERE id=?', [rx.patient_id]) : null),
+        doctor_id: rx?.doctor_id || null, date, subtotal, discount_pct: subtotal ? r2(discount * 100 / subtotal) : 0, discount, net, paid,
+        cost: r2(costTotal), pay_method: s.pay_method || 'cash', note: str(s.note), created_by: user.id
+      });
+      for (const L of lines) {
+        db.insert('sale_items', { sale_id: saleId, medicine_id: L.m.id, rx_item_id: L.it.rx_item_id || null, name: L.m.name, qty: L.qty, price: L.price, total: L.total, cost: L.lineCost, alloc: JSON.stringify(L.alloc) });
+        for (const [bid, q, c] of L.alloc) {
+          db.run('UPDATE batches SET qty_left = qty_left - ? WHERE id=?', [q, bid]);
+          db.insert('stock_moves', { date, medicine_id: L.m.id, batch_id: bid, kind: 'sale', qty: -q, unit_cost: c, unit_price: L.price, ref_type: 'sale', ref_id: saleId, user_id: user.id });
+        }
+        const allocated = L.alloc.reduce((a, x) => a + x[1], 0);
+        if (L.qty - allocated > 0.0001) db.insert('stock_moves', { date, medicine_id: L.m.id, kind: 'sale', qty: -(L.qty - allocated), unit_cost: L.m.buy_price, unit_price: L.price, ref_type: 'sale', ref_id: saleId, note: 'بدون موجودی', user_id: user.id });
+      }
+      if (rx) updateRxStatus(rx.id);
+      const out = saleFull(saleId);
+      emit('sale:new', { id: saleId, sale_code: out.sale_code, net: out.net, rx_code: out.rx_code }, ['stock', 'admin', 'pharmacy']);
+      if (rx) emit('rx:update', db.get('SELECT * FROM v_prescriptions WHERE id=?', [rx.id]), ['pharmacy', 'doctor', 'admin'], { doctor_id: rx.doctor_id });
+      lowStockCheck(lines.map(l => l.m.id));
+      return out;
+    });
+  }
+  function updateRxStatus(rxId) {
+    const items = db.all('SELECT id, qty FROM prescription_items WHERE prescription_id=?', [rxId]);
+    const disp = {}; db.all(`SELECT si.rx_item_id, SUM(si.qty - si.returned_qty) q FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE s.prescription_id=? AND s.status<>'void' GROUP BY si.rx_item_id`, [rxId]).forEach(r => disp[r.rx_item_id] = r.q);
+    const any = Object.values(disp).some(q => q > 0);
+    const all = items.every(i => (disp[i.id] || 0) > 0 && (!i.qty || disp[i.id] >= i.qty - 0.0001));
+    const status = !any ? 'new' : all ? 'dispensed' : 'partial';
+    db.update('prescriptions', rxId, { status, dispensed_at: any ? nowStr() : null });
+  }
+  function saleFull(id) {
+    const s = db.get('SELECT * FROM v_sales WHERE id=?', [id]); if (!s) fail('فروش پیدا نشد');
+    s.items = db.all(`SELECT si.*, m.code med_code, m.form, m.strength, m.unit, pi.dose, pi.frequency, pi.timing, pi.duration, pi.duration_unit, pi.note rx_note, pi.route
+      FROM sale_items si LEFT JOIN medicines m ON m.id=si.medicine_id LEFT JOIN prescription_items pi ON pi.id=si.rx_item_id WHERE si.sale_id=? ORDER BY si.id`, [id]);
+    s.patient = s.patient_id ? db.get('SELECT * FROM patients WHERE id=?', [s.patient_id]) : null;
+    return s;
+  }
+  function returnSale(id, items, note, user) {
+    return db.transaction(() => {
+      const s = db.get('SELECT * FROM sales WHERE id=?', [id]); if (!s) fail('فروش پیدا نشد');
+      if (s.status === 'void') fail('این فروش قبلاً باطل شده');
+      const ratio = s.subtotal ? (s.net / s.subtotal) : 1;
+      let refund = 0, refundCost = 0; const date = today();
+      for (const r of items || []) {
+        const si = db.get('SELECT * FROM sale_items WHERE id=? AND sale_id=?', [r.sale_item_id, id]); if (!si) continue;
+        const q = Math.min(n(r.qty), si.qty - si.returned_qty); if (q <= 0) continue;
+        // put back into the same batches (last allocated first)
+        const alloc = JSON.parse(si.alloc || '[]'); let left = q; let cost = 0;
+        const already = si.returned_qty; let skip = already;
+        for (const a of alloc.slice().reverse()) {
+          let avail = a[1]; if (skip > 0) { const s2 = Math.min(skip, avail); avail -= s2; skip -= s2; }
+          if (left <= 0 || avail <= 0) continue;
+          const take = Math.min(left, avail);
+          db.run('UPDATE batches SET qty_left = qty_left + ? WHERE id=?', [take, a[0]]);
+          db.insert('stock_moves', { date, medicine_id: si.medicine_id, batch_id: a[0], kind: 'return', qty: take, unit_cost: a[2], unit_price: r2(si.price * ratio), ref_type: 'sale', ref_id: id, note: str(note), user_id: user.id });
+          cost += take * a[2]; left -= take;
+        }
+        if (left > 0) {
+          const unitCost = si.qty ? si.cost / si.qty : 0;
+          db.insert('stock_moves', { date, medicine_id: si.medicine_id, kind: 'return', qty: left, unit_cost: unitCost, unit_price: r2(si.price * ratio), ref_type: 'sale', ref_id: id, note: str(note), user_id: user.id });
+          cost += left * unitCost;
+        }
+        db.update('sale_items', si.id, { returned_qty: si.returned_qty + q });
+        refund += q * si.price * ratio; refundCost += cost;
+      }
+      if (!refund && !refundCost) fail('مقدار برگشتی را وارد کنید');
+      const left = db.scalar('SELECT SUM(qty - returned_qty) FROM sale_items WHERE sale_id=?', [id]);
+      db.update('sales', id, { returned: r2(s.returned + refund), returned_cost: r2(s.returned_cost + refundCost), status: left > 0.0001 ? 'partial_return' : 'returned' });
+      if (s.prescription_id) updateRxStatus(s.prescription_id);
+      emit('sale:update', { id }, ['stock', 'admin', 'pharmacy']);
+      return saleFull(id);
+    });
+  }
+
+  // =================================================================== stock & purchases
+  function nextMedicineCode() { return Math.max(1000, n(db.scalar('SELECT MAX(code) FROM medicines'))) + 1; }
+  function saveMedicine(m, user) {
+    const F = ['barcode', 'name', 'generic', 'form', 'strength', 'unit', 'company', 'category', 'location', 'notes'];
+    const N = ['buy_price', 'markup_pct', 'sell_price', 'reorder_level'];
+    const row = {};
+    for (const f of F) if (f in m) row[f] = str(m[f]);
+    for (const f of N) if (f in m) row[f] = Math.max(0, n(m[f]));
+    if ('active' in m) row.active = m.active ? 1 : 0;
+    if ('code' in m && m.code !== '' && m.code != null) {
+      row.code = Math.floor(n(m.code)); if (!row.code) fail('کد دوا باید عدد باشد');
+      const dup = db.get('SELECT id, name FROM medicines WHERE code=? AND id<>?', [row.code, m.id || 0]);
+      if (dup) fail(`کد ${row.code} قبلاً برای «${dup.name}» استفاده شده`);
+    }
+    if ('buy_price' in row && !('sell_price' in m) && 'markup_pct' in row) row.sell_price = roundPrice(row.buy_price * (1 + row.markup_pct / 100));
+    if (m.id) {
+      if ('name' in row && !row.name) fail('نام دوا الزامی است');
+      db.update('medicines', m.id, row); return m.id;
+    }
+    if (!row.name) fail('نام دوا الزامی است');
+    if (!row.code) row.code = nextMedicineCode();
+    if (!('markup_pct' in row)) row.markup_pct = n(setting('default_markup', '30'));
+    const id = db.insert('medicines', row);
+    if (n(m.opening_qty) > 0) adjustStock({ medicine_id: id, qty: m.opening_qty, kind: 'opening', unit_cost: row.buy_price || 0, expiry: m.opening_expiry, batch_no: m.opening_batch }, user);
+    return id;
+  }
+
+  function supplierId(p) {
+    if (p.supplier_id) return Number(p.supplier_id);
+    const name = str(p.supplier_name); if (!name) return null;
+    const ex = db.get('SELECT id FROM suppliers WHERE name=?', [name]);
+    return ex ? ex.id : db.insert('suppliers', { name });
+  }
+  function itemQty(it) { return n(it.qty) + n(it.bonus); }
+  function unitCost(it) { const q = itemQty(it); return q ? r2(n(it.qty) * n(it.buy_price) / q * 10000) / 10000 : n(it.buy_price); }
+
+  function savePurchase(p, user) {
+    return db.transaction(() => {
+      const date = isoOk(p.date) ? p.date : today();
+      const head = {
+        factor_no: str(p.factor_no), supplier_id: supplierId(p), date, receiver: str(p.receiver), discount: Math.max(0, n(p.discount)),
+        pay_type: ['cash', 'installment', 'credit'].includes(p.pay_type) ? p.pay_type : 'cash', due_date: isoOk(p.due_date) ? p.due_date : null,
+        received: p.received === undefined ? 1 : (p.received ? 1 : 0), notes: str(p.notes), has_items: p.has_items === 0 || p.has_items === false ? 0 : 1, updated_at: nowStr()
+      };
+      let pid = p.id ? Number(p.id) : null;
+      const old = pid ? db.get('SELECT * FROM purchases WHERE id=?', [pid]) : null;
+      if (pid && !old) fail('فاکتور پیدا نشد');
+      if (pid) db.update('purchases', pid, head);
+      else pid = db.insert('purchases', { ...head, ref_no: db.nextCode('purchase'), created_by: user.id });
+
+      if (head.has_items) {
+        const items = (p.items || []).filter(i => i.medicine_id && itemQty(i) > 0);
+        const oldItems = db.all('SELECT * FROM purchase_items WHERE purchase_id=?', [pid]);
+        const keep = new Set(items.filter(i => i.id).map(i => Number(i.id)));
+        // removed lines
+        for (const oi of oldItems.filter(o => !keep.has(o.id))) {
+          const b = db.get('SELECT * FROM batches WHERE purchase_item_id=?', [oi.id]);
+          if (b && b.qty_left < b.qty_in - 0.0001) fail(`از «${db.scalar('SELECT name FROM medicines WHERE id=?', [oi.medicine_id])}» این فاکتور قبلاً فروخته شده؛ حذف ممکن نیست (فقط می‌توانید مقدار را کم کنید).`);
+          if (b) { db.run('DELETE FROM batches WHERE id=?', [b.id]); db.insert('stock_moves', { date: today(), medicine_id: oi.medicine_id, batch_id: b.id, kind: 'purchase_edit', qty: -b.qty_in, unit_cost: b.buy_price, ref_type: 'purchase', ref_id: pid, note: 'حذف از فاکتور', user_id: user.id }); }
+          db.run('DELETE FROM purchase_items WHERE id=?', [oi.id]);
+        }
+        for (const it of items) {
+          const med = db.get('SELECT * FROM medicines WHERE id=?', [it.medicine_id]); if (!med) fail('دوا پیدا نشد');
+          const markup = it.markup_pct === '' || it.markup_pct == null ? med.markup_pct : n(it.markup_pct);
+          const sell = it.sell_price === '' || it.sell_price == null || !n(it.sell_price) ? roundPrice(n(it.buy_price) * (1 + markup / 100)) : n(it.sell_price);
+          const row = { purchase_id: pid, medicine_id: med.id, batch_no: str(it.batch_no), expiry: str(it.expiry), qty: n(it.qty), bonus: n(it.bonus),
+            buy_price: n(it.buy_price), markup_pct: markup, sell_price: sell, total: r2(n(it.qty) * n(it.buy_price)) };
+          const total = itemQty(it), cost = unitCost(it);
+          if (it.id) {
+            const oi = oldItems.find(o => o.id === Number(it.id)); if (!oi) fail('ردیف فاکتور پیدا نشد');
+            const b = db.get('SELECT * FROM batches WHERE purchase_item_id=?', [oi.id]);
+            if (b && oi.medicine_id !== med.id && b.qty_left < b.qty_in - 0.0001) fail('دوای این ردیف قبلاً فروخته شده؛ تغییر نوع دوا ممکن نیست.');
+            db.update('purchase_items', oi.id, row);
+            if (b) {
+              const delta = total - b.qty_in;
+              if (b.qty_left + delta < -0.0001) fail(`مقدار جدید «${med.name}» کمتر از مقدار فروخته شده است.`);
+              db.update('batches', b.id, { medicine_id: med.id, batch_no: row.batch_no, expiry: row.expiry, qty_in: total, qty_left: r2(b.qty_left + delta), buy_price: cost });
+              if (Math.abs(delta) > 0.0001 || oi.medicine_id !== med.id) db.insert('stock_moves', { date: today(), medicine_id: med.id, batch_id: b.id, kind: 'purchase_edit', qty: delta, unit_cost: cost, ref_type: 'purchase', ref_id: pid, note: 'ویرایش فاکتور', user_id: user.id });
+            }
+          } else {
+            const iid = db.insert('purchase_items', row);
+            const bid = db.insert('batches', { medicine_id: med.id, purchase_item_id: iid, batch_no: row.batch_no, expiry: row.expiry, qty_in: total, qty_left: total, buy_price: cost, source: 'purchase' });
+            db.insert('stock_moves', { date, medicine_id: med.id, batch_id: bid, kind: 'purchase', qty: total, unit_cost: cost, ref_type: 'purchase', ref_id: pid, user_id: user.id });
+          }
+          // latest purchase defines the medicine's price
+          db.update('medicines', med.id, { buy_price: n(it.buy_price), markup_pct: markup, sell_price: sell, company: med.company || str(p.company) });
+        }
+        const subtotal = r2(db.scalar('SELECT IFNULL(SUM(total),0) FROM purchase_items WHERE purchase_id=?', [pid]));
+        db.update('purchases', pid, { subtotal, net: r2(Math.max(0, subtotal - head.discount)) });
+      } else {
+        db.update('purchases', pid, { subtotal: r2(n(p.net) + head.discount), net: r2(n(p.net)) });
+      }
+      if (!old && n(p.paid) > 0) db.insert('purchase_payments', { purchase_id: pid, date, amount: r2(p.paid), method: p.pay_method || 'cash', paid_by: str(p.receiver), note: 'پرداخت هنگام خرید', created_by: user.id });
+      recomputePurchase(pid);
+      emit('purchase:update', { id: pid }, ['stock', 'admin']);
+      return purchaseFull(pid);
+    });
+  }
+  function recomputePurchase(pid) {
+    const paid = r2(db.scalar('SELECT IFNULL(SUM(amount),0) FROM purchase_payments WHERE purchase_id=?', [pid]));
+    db.update('purchases', pid, { paid });
+  }
+  function purchaseFull(id) {
+    const p = db.get('SELECT * FROM v_purchases WHERE id=?', [id]); if (!p) fail('فاکتور پیدا نشد');
+    p.items = db.all(`SELECT i.*, m.name, m.code med_code, m.form, m.strength, m.unit, b.qty_left, b.id batch_id FROM purchase_items i JOIN medicines m ON m.id=i.medicine_id
+      LEFT JOIN batches b ON b.purchase_item_id=i.id WHERE i.purchase_id=? ORDER BY i.id`, [id]);
+    p.payments = db.all('SELECT pp.*, u.full_name user_name FROM purchase_payments pp LEFT JOIN users u ON u.id=pp.created_by WHERE pp.purchase_id=? ORDER BY pp.date, pp.id', [id]);
+    return p;
+  }
+  function addPurchasePayment(pid, pay, user) {
+    return db.transaction(() => {
+      if (!db.get('SELECT id FROM purchases WHERE id=?', [pid])) fail('فاکتور پیدا نشد');
+      const a = r2(pay.amount); if (!a) fail('مبلغ را وارد کنید');
+      if (pay.id) db.update('purchase_payments', pay.id, { date: isoOk(pay.date) ? pay.date : today(), amount: a, method: pay.method || 'cash', paid_by: str(pay.paid_by), note: str(pay.note) });
+      else db.insert('purchase_payments', { purchase_id: pid, date: isoOk(pay.date) ? pay.date : today(), amount: a, method: pay.method || 'cash', paid_by: str(pay.paid_by), note: str(pay.note), created_by: user.id });
+      recomputePurchase(pid);
+      emit('purchase:update', { id: pid }, ['stock', 'admin']);
+      return purchaseFull(pid);
+    });
+  }
+  function deletePurchasePayment(payId) {
+    return db.transaction(() => {
+      const pp = db.get('SELECT * FROM purchase_payments WHERE id=?', [payId]); if (!pp) fail('پرداخت پیدا نشد');
+      db.run('DELETE FROM purchase_payments WHERE id=?', [payId]); recomputePurchase(pp.purchase_id);
+      return purchaseFull(pp.purchase_id);
+    });
+  }
+  function deletePurchase(pid, user) {
+    return db.transaction(() => {
+      const p = db.get('SELECT * FROM purchases WHERE id=?', [pid]); if (!p) fail('فاکتور پیدا نشد');
+      const used = db.get('SELECT b.id FROM batches b JOIN purchase_items i ON i.id=b.purchase_item_id WHERE i.purchase_id=? AND b.qty_left < b.qty_in - 0.0001', [pid]);
+      if (used) fail('از دواهای این فاکتور فروخته شده؛ حذف کامل ممکن نیست.');
+      for (const b of db.all('SELECT b.* FROM batches b JOIN purchase_items i ON i.id=b.purchase_item_id WHERE i.purchase_id=?', [pid])) {
+        db.insert('stock_moves', { date: today(), medicine_id: b.medicine_id, batch_id: b.id, kind: 'purchase_edit', qty: -b.qty_in, unit_cost: b.buy_price, ref_type: 'purchase', ref_id: pid, note: 'حذف فاکتور ' + p.ref_no, user_id: user.id });
+        db.run('DELETE FROM batches WHERE id=?', [b.id]);
+      }
+      db.run('DELETE FROM purchases WHERE id=?', [pid]);
+      emit('purchase:update', { id: pid }, ['stock', 'admin']);
+      return true;
+    });
+  }
+
+  // qty > 0 adds stock (opening / adjust), qty < 0 removes (adjust / expired / damaged)
+  function adjustStock(a, user) {
+    return db.transaction(() => {
+      const m = db.get('SELECT * FROM medicines WHERE id=?', [a.medicine_id]); if (!m) fail('دوا پیدا نشد');
+      const qty = n(a.qty); if (!qty) fail('مقدار را وارد کنید');
+      const kind = ['opening', 'adjust', 'expired', 'damaged'].includes(a.kind) ? a.kind : 'adjust';
+      const date = isoOk(a.date) ? a.date : today();
+      if (qty > 0) {
+        const cost = a.unit_cost === undefined || a.unit_cost === '' ? m.buy_price : n(a.unit_cost);
+        const bid = db.insert('batches', { medicine_id: m.id, batch_no: str(a.batch_no), expiry: str(a.expiry), qty_in: qty, qty_left: qty, buy_price: cost, source: kind === 'opening' ? 'opening' : 'adjust' });
+        db.insert('stock_moves', { date, medicine_id: m.id, batch_id: bid, kind, qty, unit_cost: cost, note: str(a.note), user_id: user.id });
+      } else {
+        let left = -qty;
+        const list = a.batch_id ? db.all('SELECT * FROM batches WHERE id=? AND medicine_id=?', [a.batch_id, m.id])
+          : db.all("SELECT * FROM batches WHERE medicine_id=? AND qty_left>0 ORDER BY (expiry IS NULL OR expiry=''), expiry, id", [m.id]);
+        for (const b of list) {
+          if (left <= 0) break;
+          const take = Math.min(left, b.qty_left); if (take <= 0) continue;
+          db.run('UPDATE batches SET qty_left = qty_left - ? WHERE id=?', [take, b.id]);
+          db.insert('stock_moves', { date, medicine_id: m.id, batch_id: b.id, kind, qty: -take, unit_cost: b.buy_price, note: str(a.note), user_id: user.id });
+          left -= take;
+        }
+        if (left > 0.0001) fail(`موجودی کافی نیست (کمبود ${r2(left)})`);
+      }
+      lowStockCheck([m.id]);
+      return medicineStock(m.id);
+    });
+  }
+  function lowStockCheck(ids) {
+    for (const id of ids) {
+      const m = medicineStock(id);
+      if (m && m.active && m.stock <= m.reorder_level) emit('stock:low', { id: m.id, name: m.name, stock: m.stock, reorder_level: m.reorder_level }, ['stock', 'admin', 'pharmacy']);
+    }
+  }
+
+  // =================================================================== laboratory
+  function setLabItems(reqId, testIds) {
+    db.run('DELETE FROM lab_request_items WHERE request_id=?', [reqId]);
+    testIds.forEach((tid, i) => {
+      const t = db.get('SELECT * FROM lab_tests WHERE id=?', [tid]); if (!t) fail('آزمایش پیدا نشد');
+      db.insert('lab_request_items', { request_id: reqId, test_id: t.id, name: t.name, price: t.price, cost: t.cost, sort: i + 1 });
+    });
+    const sub = r2(db.scalar('SELECT IFNULL(SUM(price),0) FROM lab_request_items WHERE request_id=?', [reqId]));
+    const cost = r2(db.scalar('SELECT IFNULL(SUM(cost),0) FROM lab_request_items WHERE request_id=?', [reqId]));
+    const req = db.get('SELECT * FROM lab_requests WHERE id=?', [reqId]);
+    const discount = req.status === 'requested' ? r2(sub * req.discount_pct / 100) : Math.min(sub, req.discount);
+    db.update('lab_requests', reqId, { subtotal: sub, cost, discount, net: r2(sub - discount) });
+  }
+  function labFull(idOrCode) {
+    const r0 = typeof idOrCode === 'number' ? db.get('SELECT * FROM lab_requests WHERE id=?', [idOrCode]) : findByCode('lab_requests', 'lab_code', idOrCode);
+    if (!r0) fail('درخواست آزمایش با این کد پیدا نشد');
+    const r = labRequestsFull([db.get('SELECT * FROM v_lab_requests WHERE id=?', [r0.id])])[0];
+    r.patient = db.get('SELECT * FROM patients WHERE id=?', [r.patient_id]);
+    r.payments = db.all('SELECT * FROM lab_payments WHERE request_id=? ORDER BY id', [r.id]);
+    // tests to fill: panels expand to their components
+    const testIds = [];
+    for (const it of r.items) {
+      if (it.is_panel) db.all('SELECT test_id FROM lab_panel_items WHERE panel_id=? ORDER BY sort', [it.test_id]).forEach(x => testIds.push([x.test_id, it.test_id]));
+      else testIds.push([it.test_id, null]);
+    }
+    const ids = [...new Set(testIds.map(x => x[0]))];
+    r.tests = ids.length ? db.all(`SELECT t.*, d.name dept_name, d.sort dept_sort FROM lab_tests t LEFT JOIN lab_departments d ON d.id=t.department_id WHERE t.id IN (${ids.join(',')})`) : [];
+    r.tests.forEach(t => { t.panel_id = (testIds.find(x => x[0] === t.id) || [])[1]; t.ranges = db.all('SELECT * FROM lab_ranges WHERE test_id=?', [t.id]); });
+    r.tests.sort((a, b) => testIds.findIndex(x => x[0] === a.id) - testIds.findIndex(x => x[0] === b.id));
+    return r;
+  }
+  function createLabWalkin(p, user) {
+    return db.transaction(() => {
+      let patientId = p.patient_id;
+      if (p.patient) patientId = savePatient({ ...p.patient, id: patientId || undefined }, user);
+      if (!patientId) fail('مریض را انتخاب یا ثبت کنید');
+      const ids = [...new Set((p.test_ids || []).map(Number).filter(Boolean))]; if (!ids.length) fail('آزمایش انتخاب نشده');
+      const reqId = db.insert('lab_requests', { lab_code: db.nextCode('lab'), patient_id: patientId, doctor_id: p.doctor_id || null, date: today(), note: str(p.note), source: 'walkin', created_by: user.id });
+      setLabItems(reqId, ids);
+      emit('lab:new', db.get('SELECT * FROM v_lab_requests WHERE id=?', [reqId]), ['lab', 'admin']);
+      return reqId;
+    });
+  }
+  function receiveLab(id, p, user) {
+    return db.transaction(() => {
+      const r = db.get('SELECT * FROM lab_requests WHERE id=?', [id]); if (!r) fail('درخواست پیدا نشد');
+      if (r.status === 'cancelled') fail('این درخواست لغو شده');
+      if (p.test_ids) {
+        const ids = [...new Set(p.test_ids.map(Number).filter(Boolean))]; if (!ids.length) fail('حداقل یک آزمایش لازم است');
+        const old = db.all('SELECT test_id FROM lab_request_items WHERE request_id=? ORDER BY sort, id', [id]).map(x => x.test_id);
+        if (JSON.stringify(old) !== JSON.stringify(ids)) setLabItems(id, ids);
+      }
+      const sub = db.scalar('SELECT IFNULL(SUM(price),0) FROM lab_request_items WHERE request_id=?', [id]);
+      let discount = p.discount !== undefined && p.discount !== '' && p.discount !== null ? n(p.discount) : r2(sub * n(p.discount_pct ?? r.discount_pct) / 100);
+      discount = Math.min(sub, Math.max(0, discount));
+      const net = r2(sub - discount);
+      const row = { subtotal: r2(sub), discount, net, pay_method: p.pay_method || r.pay_method };
+      if (r.status === 'requested') Object.assign(row, { status: 'received', received_at: nowStr(), received_by: user.id });
+      db.update('lab_requests', id, row);
+      const pay = p.paid === undefined || p.paid === null || p.paid === '' ? (r.status === 'requested' ? net - r.paid : 0) : n(p.paid);
+      if (pay) { db.insert('lab_payments', { request_id: id, amount: r2(pay), method: p.pay_method || 'cash', created_by: user.id }); db.update('lab_requests', id, { paid: r2(r.paid + pay) }); }
+      const out = labFull(id);
+      emit('lab:update', { id, lab_code: out.lab_code, status: out.status }, ['lab', 'admin', 'doctor'], { doctor_id: out.doctor_id });
+      return out;
+    });
+  }
+  function payLab(id, amount, method, user) {
+    return db.transaction(() => {
+      const r = db.get('SELECT * FROM lab_requests WHERE id=?', [id]); if (!r) fail('درخواست پیدا نشد');
+      const a = r2(amount); if (!a) fail('مبلغ را وارد کنید');
+      db.insert('lab_payments', { request_id: id, amount: a, method: method || 'cash', created_by: user.id });
+      db.update('lab_requests', id, { paid: r2(r.paid + a) });
+      return labFull(id);
+    });
+  }
+  function saveLabResults(id, p, user) {
+    return db.transaction(() => {
+      const r = db.get('SELECT * FROM lab_requests WHERE id=?', [id]); if (!r) fail('درخواست پیدا نشد');
+      if (r.status === 'requested') fail('ابتدا درخواست را پذیرش (و فیس را دریافت) کنید');
+      for (const x of p.results || []) {
+        const val = str(x.value);
+        if (val === null) { db.run('DELETE FROM lab_results WHERE request_id=? AND test_id=?', [id, x.test_id]); continue; }
+        db.run(`INSERT INTO lab_results(request_id,test_id,value,flag,unit,ref,note,entered_by) VALUES(?,?,?,?,?,?,?,?)
+          ON CONFLICT(request_id,test_id) DO UPDATE SET value=excluded.value, flag=excluded.flag, unit=excluded.unit, ref=excluded.ref, note=excluded.note, entered_by=excluded.entered_by, entered_at=datetime('now','localtime')`,
+          [id, x.test_id, val, str(x.flag), str(x.unit), str(x.ref), str(x.note), user.id]);
+      }
+      const row = {};
+      if ('report_note' in p) row.report_note = str(p.report_note);
+      if (p.status === 'completed' && ['received', 'completed'].includes(r.status)) Object.assign(row, { status: 'completed', completed_at: nowStr() });
+      if (p.status === 'approved') Object.assign(row, { status: 'approved', approved_at: nowStr(), approved_by: user.id, completed_at: r.completed_at || nowStr() });
+      if (p.status === 'delivered') Object.assign(row, { status: 'delivered', delivered_at: nowStr() });
+      if (p.status === 'received' && ['completed', 'approved'].includes(r.status)) Object.assign(row, { status: 'received', approved_at: null, approved_by: null });
+      if (Object.keys(row).length) db.update('lab_requests', id, row);
+      const out = labFull(id);
+      if (row.status === 'approved') emit('lab:result', { id, lab_code: out.lab_code, patient_id: out.patient_id, full_name: out.full_name }, ['doctor', 'admin', 'lab'], { doctor_id: out.doctor_id });
+      else emit('lab:update', { id, lab_code: out.lab_code, status: out.status }, ['lab', 'admin']);
+      return out;
+    });
+  }
+  function saveLabTest(t, user) {
+    return db.transaction(() => {
+      const F = ['code', 'name', 'name_fa', 'sample', 'result_type', 'options', 'unit', 'ref_text', 'formula'];
+      const N = ['ref_low', 'ref_high', 'critical_low', 'critical_high', 'decimals', 'num_code', 'department_id', 'tat_hours'];
+      const row = {};
+      for (const f of F) if (f in t) row[f] = str(t[f]);
+      for (const f of N) if (f in t) row[f] = t[f] === '' || t[f] == null ? null : n(t[f]);
+      for (const f of ['price', 'cost']) if (f in t) row[f] = Math.max(0, n(t[f]));
+      for (const f of ['active', 'orderable', 'is_panel']) if (f in t) row[f] = t[f] ? 1 : 0;
+      let id = t.id ? Number(t.id) : null;
+      if (row.code) { const dup = db.get('SELECT id FROM lab_tests WHERE code=? AND id<>?', [row.code, id || 0]); if (dup) fail('این کد آزمایش تکراری است'); }
+      if (id) db.update('lab_tests', id, row);
+      else { if (!row.code || !row.name) fail('کد و نام آزمایش الزامی است'); id = db.insert('lab_tests', { result_type: 'numeric', ...row }); }
+      if (Array.isArray(t.components)) {
+        db.run('DELETE FROM lab_panel_items WHERE panel_id=?', [id]);
+        t.components.forEach((cid, i) => db.insert('lab_panel_items', { panel_id: id, test_id: Number(cid), sort: i + 1 }));
+      }
+      if (Array.isArray(t.ranges)) {
+        db.run('DELETE FROM lab_ranges WHERE test_id=?', [id]);
+        for (const r of t.ranges) db.insert('lab_ranges', { test_id: id, sex: ['M', 'F'].includes(r.sex) ? r.sex : 'A', age_min_days: r.age_min_days === '' ? null : r.age_min_days, age_max_days: r.age_max_days === '' ? null : r.age_max_days, low: r.low === '' ? null : r.low, high: r.high === '' ? null : r.high, text: str(r.text) });
+      }
+      return id;
+    });
+  }
+
+  // =================================================================== reports
+  function dayRange(from, to) {
+    const out = []; const d = new Date(from + 'T12:00:00'); const e = new Date(to + 'T12:00:00');
+    for (let i = 0; d <= e && i < 3700; i++) { out.push(`${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`); d.setDate(d.getDate() + 1); }
+    return out;
+  }
+  // per-day figures for every section (cash basis for income, accrual for sales)
+  function reportDays(from, to) {
+    if (!isoOk(from) || !isoOk(to)) fail('بازه تاریخ نامعتبر');
+    const P = [from, to];
+    const map = new Map();
+    const row = (d) => { if (!map.has(d)) map.set(d, { date: d, visits: 0, reception: 0, ph_sales: 0, ph_returns: 0, ph_cost: 0, ph_count: 0, lab_income: 0, lab_billed: 0, lab_count: 0, expenses: 0, wd_pharmacy: 0, wd_lab: 0, wd_reception: 0, wd_personal: 0, purchases: 0, supplier_paid: 0, legacy_ph: 0, legacy_lab: 0 }); return map.get(d); };
+    const add = (sql, f) => db.all(sql, P).forEach(r => f(row(r.d), r));
+    add("SELECT visit_date d, COUNT(*) c FROM visits WHERE visit_date BETWEEN ? AND ? AND status NOT IN ('cancelled','reserved') GROUP BY d", (o, r) => o.visits = r.c);
+    add('SELECT DATE(created_at) d, SUM(amount) s FROM visit_payments WHERE DATE(created_at) BETWEEN ? AND ? GROUP BY d', (o, r) => o.reception = r.s);
+    add("SELECT date d, SUM(net) s, SUM(cost) c, COUNT(*) n FROM sales WHERE date BETWEEN ? AND ? AND status<>'void' GROUP BY d", (o, r) => { o.ph_sales = r.s; o.ph_cost = r.c; o.ph_count = r.n; });
+    add("SELECT date d, SUM(qty*unit_price) s, SUM(qty*unit_cost) c FROM stock_moves WHERE kind='return' AND date BETWEEN ? AND ? GROUP BY d", (o, r) => { o.ph_returns = r.s; o.ph_cost -= r.c; });
+    add('SELECT DATE(created_at) d, SUM(amount) s FROM lab_payments WHERE DATE(created_at) BETWEEN ? AND ? GROUP BY d', (o, r) => o.lab_income = r.s);
+    add("SELECT DATE(received_at) d, SUM(net) s, COUNT(*) n FROM lab_requests WHERE received_at IS NOT NULL AND DATE(received_at) BETWEEN ? AND ? AND status<>'cancelled' GROUP BY d", (o, r) => { o.lab_billed = r.s; o.lab_count = r.n; });
+    add('SELECT date d, SUM(amount) s FROM expenses WHERE date BETWEEN ? AND ? GROUP BY d', (o, r) => o.expenses = r.s);
+    add("SELECT date d, SUM(CASE WHEN kind='personal' THEN amount ELSE 0 END) p, SUM(CASE WHEN kind<>'personal' AND section='pharmacy' THEN amount ELSE 0 END) ph, SUM(CASE WHEN kind<>'personal' AND section='lab' THEN amount ELSE 0 END) lb, SUM(CASE WHEN kind<>'personal' AND section='reception' THEN amount ELSE 0 END) rc FROM withdrawals WHERE date BETWEEN ? AND ? GROUP BY d",
+      (o, r) => { o.wd_personal = r.p; o.wd_pharmacy = r.ph; o.wd_lab = r.lb; o.wd_reception = r.rc; });
+    add('SELECT date d, SUM(net) s FROM purchases WHERE date BETWEEN ? AND ? GROUP BY d', (o, r) => o.purchases = r.s);
+    add('SELECT date d, SUM(amount) s FROM purchase_payments WHERE date BETWEEN ? AND ? GROUP BY d', (o, r) => o.supplier_paid = r.s);
+    add('SELECT date d, pharmacy_sales s, lab_income l FROM legacy_daily WHERE date BETWEEN ? AND ?', (o, r) => { o.legacy_ph = r.s; o.legacy_lab = r.l; });
+    const out = [...map.values()].sort((a, b) => a.date < b.date ? -1 : 1);
+    for (const o of out) {
+      for (const k of Object.keys(o)) if (k !== 'date') o[k] = r2(o[k]);
+      o.ph_net = r2(o.ph_sales - o.ph_returns + o.legacy_ph);           // pharmacy sales after returns (+ imported history)
+      o.ph_profit = r2(o.ph_sales - o.ph_returns - o.ph_cost);
+      o.lab_total = r2(o.lab_income + o.legacy_lab);
+      o.income = r2(o.reception + o.ph_net + o.lab_total);
+      o.withdrawals = r2(o.wd_pharmacy + o.wd_lab + o.wd_reception + o.wd_personal);
+      o.cash_left = r2(o.income - o.withdrawals - o.expenses);
+    }
+    return out;
+  }
+  function medicineSales(from, to) {
+    return db.all(`SELECT m.id, m.code, m.name, m.form, m.strength, m.unit, SUM(si.qty - si.returned_qty) qty,
+      SUM((si.qty - si.returned_qty) * si.price * CASE WHEN s.subtotal>0 THEN s.net/s.subtotal ELSE 1 END) revenue,
+      SUM(CASE WHEN si.qty>0 THEN si.cost * (si.qty - si.returned_qty) / si.qty ELSE 0 END) cost, COUNT(DISTINCT s.id) sales
+      FROM sale_items si JOIN sales s ON s.id=si.sale_id JOIN medicines m ON m.id=si.medicine_id
+      WHERE s.date BETWEEN ? AND ? AND s.status<>'void' GROUP BY m.id ORDER BY revenue DESC`, [from, to]).map(r => ({ ...r, revenue: r2(r.revenue), cost: r2(r.cost), profit: r2(r.revenue - r.cost) }));
+  }
+  function supplierLedger() {
+    return db.all(`SELECT s.*, IFNULL(SUM(p.net),0) total, IFNULL(SUM(p.paid),0) paid, IFNULL(SUM(p.net - p.paid),0) balance, COUNT(p.id) factors, MAX(p.date) last_date
+      FROM suppliers s LEFT JOIN purchases p ON p.supplier_id=s.id GROUP BY s.id ORDER BY balance DESC, s.name`);
+  }
+  function doctorStats(from, to) {
+    return db.all(`SELECT d.id, d.name, d.title,
+      (SELECT COUNT(*) FROM visits v WHERE v.doctor_id=d.id AND v.visit_date BETWEEN ? AND ? AND v.status NOT IN ('cancelled','reserved')) visits,
+      (SELECT IFNULL(SUM(v.net),0) FROM visits v WHERE v.doctor_id=d.id AND v.visit_date BETWEEN ? AND ? AND v.status NOT IN ('cancelled','reserved')) fees,
+      (SELECT COUNT(*) FROM prescriptions r WHERE r.doctor_id=d.id AND r.date BETWEEN ? AND ?) rx,
+      (SELECT COUNT(*) FROM lab_requests l WHERE l.doctor_id=d.id AND l.date BETWEEN ? AND ?) labs,
+      (SELECT IFNULL(SUM(s.net - s.returned),0) FROM sales s WHERE s.doctor_id=d.id AND s.date BETWEEN ? AND ? AND s.status<>'void') rx_sales
+      FROM doctors d WHERE d.active=1 ORDER BY d.sort`, [from, to, from, to, from, to, from, to, from, to]);
+  }
+  function stockSummary() {
+    const warn = n(setting('expiry_warn_days', '90'));
+    const lim = new Date(); lim.setDate(lim.getDate() + warn);
+    const limStr = `${lim.getFullYear()}-${pad2(lim.getMonth() + 1)}`;
+    return db.get(`SELECT COUNT(*) items, SUM(stock>0) in_stock, SUM(stock<=reorder_level) low, IFNULL(SUM(stock_cost),0) cost_value, IFNULL(SUM(stock*sell_price),0) sale_value,
+      SUM(next_expiry IS NOT NULL AND SUBSTR(next_expiry,1,7) <= ?) expiring FROM v_medicine_stock WHERE active=1`, [limStr]);
+  }
+  function dashboard() {
+    const t = today();
+    const d = new Date(); const monthStart = (() => {
+      // first day of the current solar month
+      const fmt = new Intl.DateTimeFormat('en-US-u-ca-persian', { day: 'numeric' });
+      const day = Number(fmt.formatToParts(d).find(p => p.type === 'day').value);
+      const s = new Date(d); s.setDate(s.getDate() - (day - 1));
+      return `${s.getFullYear()}-${pad2(s.getMonth() + 1)}-${pad2(s.getDate())}`;
+    })();
+    const days = reportDays(monthStart, t);
+    const sum = (k, rows = days) => r2(rows.reduce((a, r) => a + (r[k] || 0), 0));
+    const todayRow = days.find(r => r.date === t) || {};
+    const visits = db.all("SELECT status, COUNT(*) c FROM visits WHERE visit_date=? GROUP BY status", [t]);
+    return {
+      today: t, month_start: monthStart,
+      today_row: todayRow,
+      month: { reception: sum('reception'), ph_net: sum('ph_net'), ph_profit: sum('ph_profit'), lab_total: sum('lab_total'), expenses: sum('expenses'), income: sum('income'), withdrawals: sum('withdrawals'), purchases: sum('purchases') },
+      visits_by_status: Object.fromEntries(visits.map(v => [v.status, v.c])),
+      rx_pending: db.scalar("SELECT COUNT(*) FROM prescriptions WHERE status IN ('new','partial') AND date >= date('now','localtime','-7 days')"),
+      lab_pending: db.scalar("SELECT COUNT(*) FROM lab_requests WHERE status IN ('requested','received','completed')"),
+      refunds_due: db.get("SELECT COUNT(*) c, IFNULL(SUM(paid - net),0) s FROM visits WHERE paid - net > 0.001 AND status<>'cancelled'"),
+      supplier_debt: db.get('SELECT COUNT(*) c, IFNULL(SUM(net - paid),0) s FROM purchases WHERE net - paid > 0.001'),
+      expenses_unpaid: db.get('SELECT COUNT(*) c, IFNULL(SUM(amount - paid),0) s FROM expenses WHERE amount - paid > 0.001'),
+      stock: stockSummary()
+    };
+  }
+
+  return {
+    UserError, today, nowStr, savePatient, createVisit, updateVisit, setVisitStatus, payVisit,
+    patientFile, saveEncounter, getRx, createSale, saleFull, returnSale, findByCode,
+    saveMedicine, savePurchase, purchaseFull, addPurchasePayment, deletePurchasePayment, deletePurchase, adjustStock,
+    labFull, createLabWalkin, receiveLab, payLab, saveLabResults, saveLabTest, labRequestsFull,
+    reportDays, medicineSales, supplierLedger, doctorStats, stockSummary, dashboard, medicineStock, dayRange
+  };
+}
+
+module.exports = { makeOps, UserError, today, nowStr, birthFromAge };

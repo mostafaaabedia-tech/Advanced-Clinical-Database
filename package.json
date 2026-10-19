@@ -1,0 +1,91 @@
+{
+  "name": "advanced-clinical-database",
+  "productName": "Clinic Admin",
+  "version": "1.0.0",
+  "description": "Networked clinic management system (Persian): Admin/server, Stock & accounts, Reception, Doctor, Pharmacy and Laboratory stations sharing one SQLite database over the local network.",
+  "main": "main.js",
+  "station": "admin",
+  "author": "Mostafa Mesbah Aabedi",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "server": "node server/standalone.js",
+    "test": "node scripts/selftest.js",
+    "ui-test": "node scripts/ui-test.js",
+    "start:admin": "electron . --station=admin",
+    "start:stock": "electron . --station=stock",
+    "start:reception": "electron . --station=reception",
+    "start:doctor": "electron . --station=doctor",
+    "start:pharmacy": "electron . --station=pharmacy",
+    "start:lab": "electron . --station=lab",
+    "demo": "node scripts/demo-data.js",
+    "build:station": "node scripts/build-station.js"
+  },
+  "dependencies": {
+    "sql.js": "^1.15.0",
+    "xlsx": "0.18.5"
+  },
+  "devDependencies": {
+    "electron": "22.3.27",
+    "electron-builder": "^26.0.0"
+  },
+  "homepage": "https://github.com/mostafaaabedia-tech/Advanced-Clinical-Database",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mostafaaabedia-tech/Advanced-Clinical-Database.git"
+  },
+  "build": {
+    "appId": "af.clinic.acdb.admin",
+    "productName": "Clinic Admin",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "server/**/*",
+      "renderer/**/*",
+      "assets/**/*",
+      "!scripts/**",
+      "!data/**",
+      "!**/*.map"
+    ],
+    "asarUnpack": [
+      "node_modules/sql.js/dist/sql-wasm.wasm"
+    ],
+    "win": {
+      "icon": "assets/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "ia32"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Clinic Admin",
+      "artifactName": "Clinic-Admin-Setup-${version}.${ext}",
+      "installerLanguages": [
+        "en_US"
+      ],
+      "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "icon": "assets/icon.png",
+      "target": [
+        "AppImage"
+      ],
+      "category": "Office"
+    }
+  }
+}

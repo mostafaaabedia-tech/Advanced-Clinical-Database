@@ -1,0 +1,86 @@
+name: Build station apps
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - station: admin
+            name: Admin
+          - station: stock
+            name: Stock
+          - station: reception
+            name: Reception
+          - station: doctor
+            name: Doctor
+          - station: pharmacy
+            name: Pharmacy
+          - station: lab
+            name: Lab
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build ${{ matrix.name }} installer (Windows 7/8/10/11, 32 + 64 bit in one setup)
+        shell: bash
+        run: >
+          npx electron-builder --win --publish never
+          -c.extraMetadata.station=${{ matrix.station }}
+          "-c.extraMetadata.productName=Clinic ${{ matrix.name }}"
+          "-c.productName=Clinic ${{ matrix.name }}"
+          -c.appId=af.clinic.acdb.${{ matrix.station }}
+          -c.win.icon=assets/icon-${{ matrix.station }}.png
+          -c.win.signAndEditExecutable=true
+          "-c.nsis.shortcutName=Clinic ${{ matrix.name }}"
+          '-c.nsis.artifactName=Clinic-${{ matrix.name }}-Setup-${version}.${ext}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Clinic-${{ matrix.name }}
+          path: dist/*.exe
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*.exe
+          body: |
+            One installer per computer / station (each works on Windows 7, 8, 10 and 11, 32-bit and 64-bit):
+            - **Clinic-Admin-Setup** — the Admin PC. Also runs the clinic server and the database. Install this first.
+            - **Clinic-Stock-Setup** — stock, purchase factors, expenses, daily accounts and profit.
+            - **Clinic-Reception-Setup** — registration, turns, reservations and fees.
+            - **Clinic-Doctor-Setup** — patient files, prescriptions and lab requests.
+            - **Clinic-Pharmacy-Setup** — dispensing by prescription code and two receipts.
+            - **Clinic-Lab-Setup** — laboratory requests by lab code, receipts, results and reports.
