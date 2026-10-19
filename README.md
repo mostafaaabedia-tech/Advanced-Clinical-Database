@@ -30,7 +30,7 @@ flowchart TB
 Numbers can be typed without the prefix (e.g. `12` opens `RX-00012`) and every receipt carries a Code-128 barcode for scanners.
 
 ## Install
-1. Download the installers from **[Releases](../../releases)** (each works on Windows 7, 8, 10 and 11, 32- and 64-bit).
+1. Download the installers from the latest successful run in **[Actions](../../actions)** (artifacts *Clinic-Admin*, *Clinic-Stock*…), or from **Releases** after pushing a version tag (`git tag v1.0.1 && git push origin v1.0.1`). Each works on Windows 7, 8, 10 and 11, 32- and 64-bit.
 2. On the main computer install **Clinic-Admin-Setup** and open it. First login: `admin` / `1234` (you will be asked to change it). If Windows Firewall asks, click **Allow**.
 3. In Admin → *کاربران و دسترسی* create a user for each station (reception, doctors — linked to their doctor profile —, pharmacy, stock, lab).
 4. On every other computer install the program of that department. It finds the Admin PC on the network automatically; otherwise type the address shown in Admin → *شبکه و ایستگاه‌ها* (e.g. `192.168.1.10:8750`).
