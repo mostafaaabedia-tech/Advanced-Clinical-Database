@@ -85,7 +85,11 @@ async function createServer(opts = {}) {
       fs.mkdirSync(backupDir, { recursive: true });
       const day = ops.today();
       const target = path.join(backupDir, force ? `clinic-${day}-${Date.now()}.sqlite` : `clinic-${day}.sqlite`);
-      if (force || !fs.existsSync(target)) fs.writeFileSync(target, db.exportBytes());
+      if (force || !fs.existsSync(target)) {
+        fs.writeFileSync(target, db.exportBytes());
+        const extra = db.getSetting('backup_extra_dir', '');   // second copy on a USB / network drive
+        if (extra) { try { fs.mkdirSync(extra, { recursive: true }); fs.copyFileSync(target, path.join(extra, path.basename(target))); } catch (e) { log('extra backup failed', e.message); } }
+      }
       const keep = Math.max(3, Number(db.getSetting('backup_keep', '30')) || 30);
       const files = fs.readdirSync(backupDir).filter(f => /^clinic-\d{4}-\d{2}-\d{2}\.sqlite$/.test(f)).sort();
       files.slice(0, Math.max(0, files.length - keep)).forEach(f => fs.unlinkSync(path.join(backupDir, f)));
@@ -148,14 +152,15 @@ async function createServer(opts = {}) {
   });
   route('GET', '/api/bootstrap', ({ user }) => {
     need(user, ...ROLES);
-    return { user, settings: publicSettings(), doctors: db.all('SELECT * FROM doctors ORDER BY sort, id'), services: db.all('SELECT * FROM services ORDER BY sort, id'),
+    return { user, settings: publicSettings(), doctors: db.all('SELECT * FROM v_doctors ORDER BY sort, id'), services: db.all('SELECT * FROM services ORDER BY sort, id'),
+      departments: db.all('SELECT * FROM medical_departments ORDER BY sort, id'),
       server: { version, name: db.getSetting('clinic_name'), addresses: lanAddresses().map(a => a.address), port } };
   });
 
   // generic resources
   route('GET', '/api/list/:res', ({ user, params, query }) => { need(user, ...ROLES); return res$.list(params.res, query, user); });
   route('GET', '/api/get/:res/:id', ({ user, params }) => { need(user, ...ROLES); return res$.get(params.res, params.id, user); });
-  route('POST', '/api/save/:res', ({ user, params, body, req }) => { need(user, ...ROLES); const id = res$.save(params.res, body, user); if (['doctors', 'services'].includes(params.res)) bus.emit({ type: 'setup:update', data: { res: params.res } }); return id; });
+  route('POST', '/api/save/:res', ({ user, params, body, req }) => { need(user, ...ROLES); const id = res$.save(params.res, body, user); if (['doctors', 'services', 'medical_departments'].includes(params.res)) bus.emit({ type: 'setup:update', data: { res: params.res } }); return id; });
   route('POST', '/api/delete/:res/:id', ({ user, params }) => { need(user, ...ROLES); return res$.remove(params.res, params.id, user); });
 
   // users (admin)
@@ -229,7 +234,7 @@ async function createServer(opts = {}) {
   // pharmacy
   route('GET', '/api/rx/:code', ({ user, params }) => { need(user, 'pharmacy', 'stock', 'doctor'); return ops.getRx(decodeURIComponent(params.code)); });
   route('POST', '/api/sales/create', ({ user, body, req }) => { need(user, 'pharmacy'); const s = ops.createSale(body, user); audit(user, 'create', 'sale', s.id, `${s.sale_code} ${s.net}`, req); return s; });
-  route('GET', '/api/sales/:id', ({ user, params }) => { need(user, 'pharmacy', 'stock'); return ops.saleFull(Number(params.id)); });
+  route('GET', '/api/sales/:id', ({ user, params }) => { need(user, 'pharmacy', 'stock', 'reception'); return ops.saleFull(Number(params.id)); });
   route('POST', '/api/sales/return/:id', ({ user, body, params, req }) => { need(user, 'pharmacy', 'stock'); const s = ops.returnSale(Number(params.id), body.items, body.note, user); audit(user, 'return', 'sale', s.id, JSON.stringify(body.items), req); return s; });
 
   // stock
@@ -265,22 +270,71 @@ async function createServer(opts = {}) {
   // laboratory
   route('GET', '/api/lab/catalog', ({ user }) => {
     need(user, ...ROLES);
-    return { departments: db.all('SELECT * FROM lab_departments ORDER BY sort, id'), tests: db.all('SELECT * FROM lab_tests ORDER BY sort, id'),
+    return { departments: db.all('SELECT * FROM lab_departments ORDER BY sort, id'), tests: db.all('SELECT * FROM lab_tests ORDER BY sort, id'), test_items: db.all('SELECT ti.*, li.name item_name, li.unit FROM lab_test_items ti JOIN lab_items li ON li.id=ti.item_id'),
       panel_items: db.all('SELECT * FROM lab_panel_items ORDER BY panel_id, sort'), ranges: db.all('SELECT * FROM lab_ranges') };
   });
-  route('GET', '/api/lab/req/:code', ({ user, params, query }) => { need(user, 'lab', 'doctor', 'stock'); return ops.labFull(query.id ? Number(query.id) : decodeURIComponent(params.code)); });
-  route('POST', '/api/lab/walkin', ({ user, body, req }) => { need(user, 'lab'); const id = ops.createLabWalkin(body, user); audit(user, 'create', 'lab_request', id, 'walk-in', req); return ops.labFull(id); });
-  route('POST', '/api/lab/receive/:id', ({ user, body, params, req }) => { need(user, 'lab'); const r = ops.receiveLab(Number(params.id), body, user); audit(user, 'receive', 'lab_request', r.id, `${r.lab_code} ${r.net}`, req); return r; });
-  route('POST', '/api/lab/pay/:id', ({ user, body, params, req }) => { need(user, 'lab'); const r = ops.payLab(Number(params.id), body.amount, body.method, user); audit(user, 'pay', 'lab_request', r.id, String(body.amount), req); return r; });
+  route('GET', '/api/lab/req/:code', ({ user, params, query }) => { need(user, 'lab', 'doctor', 'stock', 'reception'); return ops.labFull(query.id ? Number(query.id) : decodeURIComponent(params.code)); });
+  route('POST', '/api/lab/walkin', ({ user, body, req }) => { need(user, 'lab', 'reception'); const id = ops.createLabWalkin(body, user); audit(user, 'create', 'lab_request', id, 'walk-in', req); return ops.labFull(id); });
+  route('POST', '/api/lab/receive/:id', ({ user, body, params, req }) => { need(user, 'lab', 'reception'); const r = ops.receiveLab(Number(params.id), body, user); audit(user, 'receive', 'lab_request', r.id, `${r.lab_code} ${r.net}`, req); return r; });
+  route('POST', '/api/lab/pay/:id', ({ user, body, params, req }) => { need(user, 'lab', 'reception'); const r = ops.payLab(Number(params.id), body.amount, body.method, user); audit(user, 'pay', 'lab_request', r.id, String(body.amount), req); return r; });
   route('POST', '/api/lab/results/:id', ({ user, body, params, req }) => { need(user, 'lab'); const r = ops.saveLabResults(Number(params.id), body, user); audit(user, 'results', 'lab_request', r.id, body.status || '', req); return r; });
   route('POST', '/api/lab/cancel/:id', ({ user, body, params, req }) => {
-    need(user, 'lab');
+    need(user, 'lab', 'reception');
     const r = db.get('SELECT * FROM lab_requests WHERE id=?', [params.id]); if (!r) throw new UserError('درخواست پیدا نشد');
     if (r.paid > 0) throw new UserError('ابتدا پول پرداخت شده را مسترد کنید (پرداخت منفی)');
-    db.update('lab_requests', r.id, { status: 'cancelled', report_note: body.reason || r.report_note }); audit(user, 'cancel', 'lab_request', r.id, body.reason, req);
+    if (user.role === 'reception' && !['requested', 'received'].includes(r.status)) throw new UserError('نتایج این آزمایش ثبت شده؛ فقط لابراتوار می‌تواند لغو کند');
+    db.update('lab_requests', r.id, { status: 'cancelled', report_note: body.reason || r.report_note }); ops.applyLabConsumption(r.id, user); audit(user, 'cancel', 'lab_request', r.id, body.reason, req);
     bus.emit({ type: 'lab:update', data: { id: r.id, status: 'cancelled' }, roles: ['lab', 'admin'] }); return true;
   });
   route('POST', '/api/lab/test/save', ({ user, body, req }) => { need(user, 'lab'); const id = ops.saveLabTest(body, user); audit(user, body.id ? 'update' : 'create', 'lab_test', id, body.code || '', req); return id; });
+
+
+  // central cashier at reception: doctor fees, laboratory, pharmacy, beds, deposits
+  route('POST', '/api/sales/pay/:id', ({ user, body, params, req }) => {
+    need(user, 'reception', 'pharmacy', 'stock');
+    if (user.role === 'pharmacy' && db.getSetting('cashier_mode', 'central') === 'central') throw new UserError('پرداخت فقط در صندوق پذیرش گرفته می‌شود (تنظیمات: صندوق مرکزی)');
+    const s2 = ops.paySale(Number(params.id), body.amount, body.method, body.note, user); audit(user, 'pay', 'sale', s2.id, String(body.amount), req); return s2;
+  });
+  route('GET', '/api/cashier/pending', ({ user }) => { need(user, 'reception', 'stock'); return ops.cashierPending(); });
+  route('GET', '/api/cashier/patient/:id', ({ user, params }) => { need(user, 'reception', 'stock'); return ops.patientAccount(Number(params.id)); });
+  route('POST', '/api/cashier/pay', ({ user, body, req }) => { need(user, 'reception'); const r = ops.cashierPay(body, user); audit(user, 'cashier_pay', body.kind, body.id, `${body.amount} ${body.method || ''}`, req); return r; });
+  route('POST', '/api/cashier/deposit', ({ user, body, req }) => { need(user, 'reception'); const b = db.transaction(() => ops.addDeposit(Number(body.patient_id), body.amount, body.method, body.note, user)); audit(user, 'deposit', 'patient', body.patient_id, String(body.amount), req); return b; });
+  route('GET', '/api/cashier/day', ({ user, query }) => { need(user, 'reception', 'stock'); return ops.cashierDay(query.from || ops.today(), query.to); });
+  route('POST', '/api/cashier/close', ({ user, body, req }) => { need(user, 'reception'); const c = ops.cashClose(body, user); audit(user, 'cash_close', 'cash', c.id, `${c.expected} / ${c.counted}`, req); return c; });
+
+  // laboratory: sample taken, materials store
+  route('POST', '/api/lab/sample/:id', ({ user, params, req }) => { need(user, 'lab'); db.update('lab_requests', Number(params.id), { sampled_at: ops.nowStr(), sampled_by: user.id }); audit(user, 'sample', 'lab_request', params.id, '', req); return ops.labFull(Number(params.id)); });
+  route('POST', '/api/lab/items/move', ({ user, body, req }) => { need(user, 'lab', 'stock'); const it = ops.labItemMove(body, user); audit(user, 'lab_item_' + (body.kind || 'adjust'), 'lab_item', it.id, String(body.qty), req); return it; });
+  route('GET', '/api/lab/items/:id', ({ user, params }) => {
+    need(user, 'lab', 'stock');
+    const it = db.get('SELECT * FROM lab_items WHERE id=?', [params.id]); if (!it) throw new UserError('مواد پیدا نشد');
+    it.moves = db.all('SELECT m.*, u.full_name user_name FROM lab_item_moves m LEFT JOIN users u ON u.id=m.user_id WHERE item_id=? ORDER BY m.id DESC LIMIT 400', [it.id]);
+    it.tests = db.all('SELECT ti.qty, t.id, t.code, t.name FROM lab_test_items ti JOIN lab_tests t ON t.id=ti.test_id WHERE ti.item_id=?', [it.id]);
+    return it;
+  });
+  route('GET', '/api/lab/items-usage', ({ user, query }) => {
+    need(user, 'lab', 'stock');
+    return db.all(`SELECT li.id, li.name, li.unit, li.stock, li.cost, IFNULL(SUM(CASE WHEN m.qty<0 THEN -m.qty ELSE 0 END),0) used, IFNULL(SUM(CASE WHEN m.qty>0 AND m.kind='in' THEN m.qty ELSE 0 END),0) received
+      FROM lab_items li LEFT JOIN lab_item_moves m ON m.item_id=li.id AND m.date BETWEEN ? AND ? GROUP BY li.id ORDER BY used DESC`, [query.from || '0000', query.to || '9999']);
+  });
+
+  // in-patients (beds)
+  route('GET', '/api/ipd/board', ({ user }) => { need(user, 'reception', 'doctor', 'stock'); return ops.ipdBoard(); });
+  route('GET', '/api/ipd/:id', ({ user, params }) => { need(user, 'reception', 'doctor', 'stock'); return ops.admissionFull(Number(params.id)); });
+  route('POST', '/api/ipd/admit', ({ user, body, req }) => { need(user, 'reception'); const a = ops.admit(body, user); audit(user, 'admit', 'admission', a.id, a.adm_no, req); return a; });
+  route('POST', '/api/ipd/transfer/:id', ({ user, body, params, req }) => { need(user, 'reception'); const a = ops.transferBed(Number(params.id), Number(body.bed_id), user); audit(user, 'transfer', 'admission', a.id, String(body.bed_id), req); return a; });
+  route('POST', '/api/ipd/charge/:id', ({ user, body, params, req }) => { need(user, 'reception', 'doctor'); const a = ops.addAdmissionCharge(Number(params.id), body, user); audit(user, 'charge', 'admission', a.id, `${body.name || ''} ${body.amount || ''}`, req); return a; });
+  route('POST', '/api/ipd/discharge/:id', ({ user, body, params, req }) => { need(user, 'reception'); const a = ops.dischargeAdmission(Number(params.id), body, user); audit(user, 'discharge', 'admission', a.id, a.adm_no, req); return a; });
+
+  // stock: purchase suggestions, alternatives
+  route('GET', '/api/stock/reorder', ({ user }) => { need(user, 'stock', 'pharmacy'); return ops.reorderSuggestions(); });
+  route('GET', '/api/medicine-alternatives/:id', ({ user, params }) => { need(user, ...ROLES); return ops.alternatives(Number(params.id)); });
+
+  // doctors: load & weekly schedule; waiting-room display
+  route('GET', '/api/doctor-load', ({ user, query }) => { need(user, ...ROLES); return ops.doctorLoad(query.date); });
+  route('POST', '/api/doctors/schedule/:id', ({ user, body, params, req }) => { need(user, 'reception'); const r = ops.saveDoctorSchedule(Number(params.id), body.rows); audit(user, 'schedule', 'doctor', params.id, JSON.stringify(body.rows || []).slice(0, 300), req); bus.emit({ type: 'setup:update', data: { res: 'doctors' } }); return r; });
+  route('GET', '/api/queue/display', ({ user }) => { need(user, ...ROLES); return { groups: ops.queueDisplay(), clinic: db.getSetting('clinic_name'), time: new Date().toISOString() }; });
+  route('POST', '/api/visits/call/:id', ({ user, params, req }) => { need(user, 'doctor', 'reception'); const r = ops.callVisit(Number(params.id), user); audit(user, 'call', 'visit', params.id, String(r.turn), req); return r; });
 
   // admin: network, backup, import, audit
   route('GET', '/api/network', ({ user }) => {
@@ -370,6 +424,8 @@ async function createServer(opts = {}) {
 
   const server = http.createServer((req, res) => { handle(req, res).catch(e => { log('fatal', e); try { send(res, 500, { ok: false, error: e.message }); } catch (_) { } }); });
   server.keepAliveTimeout = 65000;
+  const sockets = new Set();
+  server.on('connection', (sock) => { sockets.add(sock); sock.on('close', () => sockets.delete(sock)); });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, opts.host || '0.0.0.0', resolve); });
   log(`listening on port ${port} — ${lanAddresses().map(a => a.address).join(', ') || 'localhost'}`);
 
@@ -396,7 +452,14 @@ async function createServer(opts = {}) {
   return {
     port, db, ops, server, dataDir, backupDir,
     addresses: () => lanAddresses(),
-    close: () => new Promise(r => { clearInterval(announceTimer); try { udp && udp.close(); } catch (_) { } for (const c of clients.values()) try { c.res.end(); } catch (_) { } server.close(() => { db.close(); r(); }); })
+    close: () => new Promise(r => {
+      clearInterval(announceTimer); try { udp && udp.close(); } catch (_) { }
+      for (const c of clients.values()) try { c.res.end(); } catch (_) { }
+      let done = false; const fin = () => { if (done) return; done = true; try { db.close(); } catch (_) { } r(); };
+      server.close(fin);
+      for (const sock of sockets) try { sock.destroy(); } catch (_) { }   // keep-alive connections would otherwise block close()
+      setTimeout(fin, 1000);
+    })
   };
 }
 

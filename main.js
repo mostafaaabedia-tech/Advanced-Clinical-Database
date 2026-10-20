@@ -21,8 +21,20 @@ function loadCfg() { try { cfg = JSON.parse(fs.readFileSync(cfgFile(), 'utf8'));
 function saveCfg() { fs.mkdirSync(path.dirname(cfgFile()), { recursive: true }); fs.writeFileSync(cfgFile(), JSON.stringify(cfg, null, 2)); }
 function wasmPath() { return path.join(__dirname, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm').replace('app.asar' + path.sep, 'app.asar.unpacked' + path.sep); }
 
-if (!app.requestSingleInstanceLock()) { app.quit(); }
-app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
+let quitting = false;
+const alive = () => !!win && !win.isDestroyed();
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) { quitting = true; app.quit(); }
+// a second double-click on the shortcut: show the existing window (or re-create it if it was closed)
+app.on('second-instance', () => {
+  if (quitting) return;
+  if (alive()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); return; }
+  if (app.isReady()) { createWindow(); openStation().catch(logError); }
+});
+// never show the "JavaScript error in the main process" box for a non-fatal error — log it instead
+function logError(e) { try { fs.appendFileSync(path.join(app.getPath('userData'), 'error.log'), `[${new Date().toISOString()}] ${e && e.stack || e}\n`); } catch (_) { } }
+process.on('uncaughtException', logError);
+process.on('unhandledRejection', logError);
 
 // ---------------- server discovery (stations) ----------------
 const found = new Map();
@@ -58,42 +70,52 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false, spellcheck: false, additionalArguments: ['--station=' + STATION] }
   });
   Menu.setApplicationMenu(null);
-  win.once('ready-to-show', () => { win.maximize(); win.show(); });
+  const w = win;
+  w.once('ready-to-show', () => { if (!w.isDestroyed()) { w.maximize(); w.show(); } });
+  w.on('closed', () => { if (win === w) win = null; });
+  w.webContents.on('render-process-gone', () => { if (!w.isDestroyed() && !quitting) w.webContents.reload(); });
   win.webContents.on('before-input-event', (e, input) => {
-    if (input.type !== 'keyDown') return;
-    if (input.key === 'F12') win.webContents.toggleDevTools();
-    if (input.key === 'F5') win.webContents.reload();
-    if (input.key === 'F11') win.setFullScreen(!win.isFullScreen());
+    if (input.type !== 'keyDown' || w.isDestroyed()) return;
+    if (input.key === 'F12') w.webContents.toggleDevTools();
+    if (input.key === 'F5') w.webContents.reload();
+    if (input.key === 'F11') w.setFullScreen(!w.isFullScreen());
   });
-  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
-  win.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => { if (isMain && STATION !== 'admin' && !String(url).startsWith('file:')) showConnect('اتصال به سرور ممکن نشد: ' + desc); });
+  w.webContents.setWindowOpenHandler(({ url }) => {
+    // the queue display (TV) opens in its own window; other links in the browser
+    if (/\/display\.html/.test(url)) return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, backgroundColor: '#0b1220', icon: path.join(__dirname, 'assets', `icon-${STATION}.png`) } };
+    if (/^https?:/.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  w.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => { if (isMain && !w.isDestroyed() && STATION !== 'admin' && !String(url).startsWith('file:') && code !== -3) showConnect('اتصال به سرور ممکن نشد: ' + desc); });
   win.on('page-title-updated', (e) => e.preventDefault());
   if (process.env.ACDB_SHOT) {   // automated smoke test: save a screenshot after the page loads, then quit
     win.webContents.on('did-finish-load', () => setTimeout(async () => {
-      try { fs.writeFileSync(process.env.ACDB_SHOT, (await win.webContents.capturePage()).toPNG()); } catch (e) { console.error(e); }
-      win.__closing = true; app.quit();
+      try { fs.writeFileSync(process.env.ACDB_SHOT, (await w.webContents.capturePage()).toPNG()); } catch (e) { console.error(e); }
+      w.__closing = true; app.quit();
     }, Number(process.env.ACDB_SHOT_DELAY || 3000)));
   }
-  win.on('close', async (e) => {
-    if (STATION !== 'admin' || win.__closing) return;
+  w.on('close', async (e) => {
+    if (STATION !== 'admin' || w.__closing || quitting) return;
     e.preventDefault();
-    const r = await dialog.showMessageBox(win, { type: 'warning', buttons: ['بستن برنامه', 'انصراف'], defaultId: 1, cancelId: 1, title: 'بستن سرور',
+    const r = await dialog.showMessageBox(w, { type: 'warning', buttons: ['بستن برنامه', 'انصراف'], defaultId: 1, cancelId: 1, title: 'بستن سرور',
       message: 'این کمپیوتر سرور کلینیک است.', detail: 'با بستن این برنامه، همه ایستگاه‌ها (پذیرش، داکتر، دواخانه، لابراتوار، انبار) قطع می‌شوند. ادامه می‌دهید؟' });
-    if (r.response === 0) { win.__closing = true; win.close(); }
+    if (r.response === 0 && !w.isDestroyed()) { w.__closing = true; w.close(); }
   });
 }
 function showConnect(msg) {
+  if (!alive()) return;
   startDiscovery(); query();
   win.loadFile(path.join(__dirname, 'renderer', 'connect.html'), { query: { station: STATION, msg: msg || '', server: cfg.server || '' } });
 }
 async function openStation() {
+  if (!alive()) return;
   if (STATION === 'admin') return win.loadURL(`http://127.0.0.1:${server.port}/?station=admin`);
-  if (cfg.server && await ping(cfg.server)) return win.loadURL(`${cfg.server.replace(/\/+$/, '')}/?station=${STATION}`);
+  if (cfg.server && await ping(cfg.server)) return alive() && win.loadURL(`${cfg.server.replace(/\/+$/, '')}/?station=${STATION}`);
   // try to find the server automatically for a few seconds
   startDiscovery();
   for (let i = 0; i < 8; i++) {
     query(); await new Promise(r => setTimeout(r, 500));
-    for (const s of found.values()) if (await ping(s.url)) { cfg.server = s.url; saveCfg(); return win.loadURL(`${s.url}/?station=${STATION}`); }
+    for (const s of found.values()) if (await ping(s.url)) { cfg.server = s.url; saveCfg(); return alive() && win.loadURL(`${s.url}/?station=${STATION}`); }
   }
   showConnect(cfg.server ? 'سرور قبلی (' + cfg.server + ') پاسخ نمی‌دهد. کمپیوتر مدیر روشن است؟' : '');
 }
@@ -109,7 +131,7 @@ function registerIpc() {
     e.sender.print(opts, (success, reason) => resolve({ success, reason }));
   }));
   ipcMain.handle('native:pdf', async (e, o = {}) => {
-    const r = await dialog.showSaveDialog(win, { defaultPath: String(o.name || 'document').replace(/[\\/:*?"<>|]+/g, ' ') + '.pdf', filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    const r = await dialog.showSaveDialog(BrowserWindow.fromWebContents(e.sender) || undefined, { defaultPath: String(o.name || 'document').replace(/[\\/:*?"<>|]+/g, ' ') + '.pdf', filters: [{ name: 'PDF', extensions: ['pdf'] }] });
     if (r.canceled || !r.filePath) return null;
     const pdf = await e.sender.printToPDF({ pageSize: o.pageSize || 'A4', printBackground: true, margins: { marginType: 'none' }, preferCSSPageSize: true });
     fs.writeFileSync(r.filePath, pdf); shell.openPath(r.filePath); return r.filePath;
@@ -124,12 +146,13 @@ function registerIpc() {
     const p = await ping(u, 4000);
     if (!p) throw new Error('سرور در این آدرس پیدا نشد: ' + u);
     cfg.server = u.replace(/\/+$/, ''); saveCfg();
-    win.loadURL(`${cfg.server}/?station=${STATION}`);
+    if (alive()) win.loadURL(`${cfg.server}/?station=${STATION}`);
     return p;
   });
 }
 
 app.whenReady().then(async () => {
+  if (!gotLock) return;
   loadCfg();
   registerIpc();
   createWindow();
@@ -139,10 +162,19 @@ app.whenReady().then(async () => {
       server = await createServer({ dataDir: dataDir(), port: Number(cfg.port || process.env.ACDB_PORT || DEFAULT_PORT), wasmPath: wasmPath(), staticDir: path.join(__dirname, 'renderer'), version: app.getVersion() });
     } catch (e) {
       dialog.showErrorBox('خطای سرور کلینیک', (e.code === 'EADDRINUSE' ? `پورت ${cfg.port || DEFAULT_PORT} مشغول است. احتمالاً برنامه مدیر دو بار باز شده.\n\n` : '') + String(e && e.stack || e));
-      app.quit(); return;
+      quitting = true; app.exit(1); return;
     }
   }
   await openStation();
 });
-app.on('window-all-closed', async () => { try { server && await server.close(); } catch (_) { } app.quit(); });
-app.on('before-quit', () => { try { server && server.db && server.db.saveNow(); } catch (_) { } });
+// closing the last window ends the program completely (the server is stopped and the database saved) —
+// nothing is left running in the background, so the next start is always clean
+async function shutdown() {
+  if (quitting && shutdown.done) return; quitting = true; shutdown.done = true;
+  try { server && server.db && server.db.saveNow(); } catch (e) { logError(e); }
+  try { if (server) await Promise.race([server.close(), new Promise(r => setTimeout(r, 1500))]); } catch (e) { logError(e); }
+  try { udp && udp.close(); } catch (_) { }
+  app.exit(0);
+}
+app.on('window-all-closed', () => { shutdown(); });
+app.on('before-quit', () => { quitting = true; try { server && server.db && server.db.saveNow(); } catch (_) { } });

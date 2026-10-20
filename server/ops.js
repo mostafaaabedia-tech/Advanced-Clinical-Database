@@ -24,7 +24,7 @@ function makeOps(db, bus) {
 
   // =================================================================== patients
   const PATIENT_FIELDS = ['full_name', 'father_name', 'sex', 'birth_date', 'phone', 'address', 'tazkira', 'blood_group', 'allergies', 'chronic_diseases',
-    'past_history', 'family_history', 'current_medications', 'notes'];
+    'past_history', 'family_history', 'current_medications', 'notes', 'emergency_name', 'emergency_phone', 'insurance', 'insurance_no'];
   function savePatient(p, user) {
     p = p || {};
     const row = {};
@@ -82,10 +82,10 @@ function makeOps(db, bus) {
         visit_no: db.nextCode('visit'), patient_id: patientId, doctor_id: doctorId, service_id: service?.id || null, service_name: serviceName,
         visit_date: date, reserved_time: str(v.reserved_time), queue_key: key, turn_no: nextTurn(date, key),
         status: reserved ? 'reserved' : 'waiting', fee, discount, net, paid, pay_method: v.pay_method || 'cash',
-        age_text: str(v.age_text), weight: v.weight ? n(v.weight) : null, note: str(v.note), created_by: user?.id || null,
+        age_text: str(v.age_text), weight: v.weight ? n(v.weight) : null, height: v.height ? n(v.height) : null, note: str(v.note), created_by: user?.id || null,
         checked_in_at: reserved ? null : nowStr()
       });
-      if (paid > 0) db.insert('visit_payments', { visit_id: id, amount: paid, method: v.pay_method || 'cash', note: 'پرداخت هنگام پذیرش', created_by: user?.id || null });
+      if (paid > 0) db.insert('visit_payments', { visit_id: id, amount: paid, method: v.pay_method || 'cash', note: 'پرداخت هنگام پذیرش', station: 'reception', created_by: user?.id || null });
       const row = db.get('SELECT * FROM v_visits WHERE id=?', [id]);
       emit('visit:new', row, ['reception', 'doctor', 'admin'], { doctor_id: doctorId });
       return row;
@@ -100,6 +100,7 @@ function makeOps(db, bus) {
       if ('note' in v) row.note = str(v.note);
       if ('reserved_time' in v) row.reserved_time = str(v.reserved_time);
       if ('weight' in v) row.weight = v.weight ? n(v.weight) : null;
+      if ('height' in v) row.height = v.height ? n(v.height) : null;
       if ('doctor_id' in v || 'service_id' in v || 'visit_date' in v) {
         const doctorId = 'doctor_id' in v ? (v.doctor_id ? Number(v.doctor_id) : null) : old.doctor_id;
         const serviceId = 'service_id' in v ? (v.service_id ? Number(v.service_id) : null) : old.service_id;
@@ -136,11 +137,11 @@ function makeOps(db, bus) {
     emit('visit:update', out, ['reception', 'doctor', 'admin'], { doctor_id: out.doctor_id });
     return out;
   }
-  function payVisit(id, amount, method, note, user) {
+  function payVisit(id, amount, method, note, user, station) {
     return db.transaction(() => {
       const v = db.get('SELECT * FROM visits WHERE id=?', [id]); if (!v) fail('پذیرش پیدا نشد');
       const a = r2(amount); if (!a) fail('مبلغ را وارد کنید');
-      db.insert('visit_payments', { visit_id: id, amount: a, method: method || 'cash', note: str(note), created_by: user?.id || null });
+      db.insert('visit_payments', { visit_id: id, amount: a, method: method || 'cash', note: str(note), station: station || user?.station || null, created_by: user?.id || null });
       db.update('visits', id, { paid: r2(v.paid + a) });
       const out = db.get('SELECT * FROM v_visits WHERE id=?', [id]);
       emit('visit:update', out, ['reception', 'admin'], { doctor_id: out.doctor_id });
@@ -170,7 +171,7 @@ function makeOps(db, bus) {
   }
 
   const ENC_FIELDS = ['bp_sys', 'bp_dia', 'pulse', 'resp_rate', 'temp', 'weight', 'height', 'spo2', 'blood_sugar', 'head_circ',
-    'complaint', 'history', 'exam', 'diagnosis', 'impression', 'notes', 'private_notes', 'print_note', 'next_visit'];
+    'complaint', 'history', 'exam', 'diagnosis', 'diagnosis_code', 'impression', 'notes', 'private_notes', 'print_note', 'next_visit'];
   const NUMERIC_ENC = new Set(['bp_sys', 'bp_dia', 'pulse', 'resp_rate', 'temp', 'weight', 'height', 'spo2', 'blood_sugar', 'head_circ']);
   const RX_ITEM_FIELDS = ['medicine_id', 'name', 'form', 'strength', 'unit', 'dose', 'frequency', 'timing', 'route', 'duration', 'duration_unit', 'qty', 'note'];
   const rxSig = (items) => JSON.stringify((items || []).map(i => RX_ITEM_FIELDS.map(f => i[f] == null || i[f] === '' ? null : String(i[f]))));
@@ -195,6 +196,7 @@ function makeOps(db, bus) {
         encId = db.insert('encounters', { ...enc, visit_id: visit?.id || null, patient_id: patientId, doctor_id: doctorId, date: today(), created_by: user.id });
       }
       if (enc.weight && visit) db.update('visits', visit.id, { weight: enc.weight });
+      if (enc.height && visit) db.update('visits', visit.id, { height: enc.height });
 
       // ---- prescription (pharmacy code) ----
       let rxOut = null;
@@ -276,6 +278,15 @@ function makeOps(db, bus) {
     return db.get('SELECT * FROM v_medicine_stock WHERE active=1 AND name = ? COLLATE NOCASE ORDER BY stock DESC LIMIT 1', [name])
       || db.get('SELECT * FROM v_medicine_stock WHERE active=1 AND (name LIKE ? OR generic LIKE ?) ORDER BY stock DESC LIMIT 1', [name + '%', name + '%']);
   }
+  // same generic medicine with stock — suggested when the prescribed brand is out of stock
+  function alternatives(medId) {
+    const m = db.get('SELECT * FROM medicines WHERE id=?', [medId]); if (!m || !m.generic) return [];
+    return db.all("SELECT * FROM v_medicine_stock WHERE active=1 AND id<>? AND stock>0 AND LOWER(TRIM(generic))=LOWER(TRIM(?)) ORDER BY (IFNULL(strength,'')=?) DESC, stock DESC LIMIT 5", [m.id, m.generic, m.strength || '']);
+  }
+  function alternativesByName(name) {
+    const nm = String(name || '').trim(); if (!nm) return [];
+    return db.all("SELECT * FROM v_medicine_stock WHERE active=1 AND stock>0 AND (LOWER(generic) LIKE LOWER(?) OR LOWER(name) LIKE LOWER(?)) ORDER BY stock DESC LIMIT 5", ['%' + nm.split(' ')[0] + '%', '%' + nm.split(' ')[0] + '%']);
+  }
   function getRx(code) {
     const rx0 = findByCode('prescriptions', 'rx_code', code); if (!rx0) fail('نسخه با این کد پیدا نشد');
     const rx = db.get('SELECT * FROM v_prescriptions WHERE id=?', [rx0.id]);
@@ -283,7 +294,7 @@ function makeOps(db, bus) {
     const dispensed = {};
     db.all(`SELECT si.rx_item_id, SUM(si.qty - si.returned_qty) q FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE s.prescription_id=? AND s.status<>'void' GROUP BY si.rx_item_id`, [rx.id])
       .forEach(r => dispensed[r.rx_item_id] = r.q);
-    rx.items.forEach(i => { i.match = matchMedicine(i); i.dispensed = dispensed[i.id] || 0; });
+    rx.items.forEach(i => { i.match = matchMedicine(i); i.dispensed = dispensed[i.id] || 0; i.alternatives = i.match && i.match.stock <= 0 ? alternatives(i.match.id) : (!i.match ? alternativesByName(i.name) : []); });
     rx.sales = db.all('SELECT * FROM v_sales WHERE prescription_id=? ORDER BY id DESC', [rx.id]);
     rx.patient = db.get('SELECT * FROM patients WHERE id=?', [rx.patient_id]);
     return rx;
@@ -323,7 +334,8 @@ function makeOps(db, bus) {
       const pct = Math.min(100, Math.max(0, n(s.discount_pct)));
       const discount = s.discount !== undefined && s.discount !== '' && s.discount !== null ? Math.min(subtotal, Math.max(0, n(s.discount))) : r2(subtotal * pct / 100);
       const net = r2(subtotal - discount);
-      const paid = s.paid === undefined || s.paid === null || s.paid === '' ? net : Math.max(0, n(s.paid));
+      const centralPh = setting('cashier_mode', 'central') === 'central' && user.station === 'pharmacy';
+      const paid = s.paid === undefined || s.paid === null || s.paid === '' ? (centralPh ? 0 : net) : Math.max(0, n(s.paid));
       const date = today();
       const saleId = db.insert('sales', {
         sale_code: db.nextCode('sale'), prescription_id: rx?.id || null, rx_code: rx?.rx_code || null,
@@ -331,6 +343,7 @@ function makeOps(db, bus) {
         doctor_id: rx?.doctor_id || null, date, subtotal, discount_pct: subtotal ? r2(discount * 100 / subtotal) : 0, discount, net, paid,
         cost: r2(costTotal), pay_method: s.pay_method || 'cash', note: str(s.note), created_by: user.id
       });
+      if (paid > 0) db.insert('sale_payments', { sale_id: saleId, amount: paid, method: s.pay_method || 'cash', note: 'پرداخت هنگام فروش', station: user.station || 'pharmacy', created_by: user.id });
       for (const L of lines) {
         db.insert('sale_items', { sale_id: saleId, medicine_id: L.m.id, rx_item_id: L.it.rx_item_id || null, name: L.m.name, qty: L.qty, price: L.price, total: L.total, cost: L.lineCost, alloc: JSON.stringify(L.alloc) });
         for (const [bid, q, c] of L.alloc) {
@@ -599,12 +612,16 @@ function makeOps(db, bus) {
     // tests to fill: panels expand to their components
     const testIds = [];
     for (const it of r.items) {
-      if (it.is_panel) db.all('SELECT test_id FROM lab_panel_items WHERE panel_id=? ORDER BY sort', [it.test_id]).forEach(x => testIds.push([x.test_id, it.test_id]));
+      if (it.is_panel) db.all('SELECT pi.test_id FROM lab_panel_items pi JOIN lab_tests t ON t.id=pi.test_id WHERE pi.panel_id=? AND t.active=1 ORDER BY pi.sort', [it.test_id]).forEach(x => testIds.push([x.test_id, it.test_id]));
       else testIds.push([it.test_id, null]);
     }
     const ids = [...new Set(testIds.map(x => x[0]))];
-    r.tests = ids.length ? db.all(`SELECT t.*, d.name dept_name, d.sort dept_sort FROM lab_tests t LEFT JOIN lab_departments d ON d.id=t.department_id WHERE t.id IN (${ids.join(',')})`) : [];
-    r.tests.forEach(t => { t.panel_id = (testIds.find(x => x[0] === t.id) || [])[1]; t.ranges = db.all('SELECT * FROM lab_ranges WHERE test_id=?', [t.id]); });
+    r.tests = ids.length ? db.all(`SELECT t.*, d.name dept_name, d.name_fa dept_name_fa, d.sort dept_sort FROM lab_tests t LEFT JOIN lab_departments d ON d.id=t.department_id WHERE t.id IN (${ids.join(',')})`) : [];
+    r.tests.forEach(t => {
+      t.panel_id = (testIds.find(x => x[0] === t.id) || [])[1]; t.ranges = db.all('SELECT * FROM lab_ranges WHERE test_id=?', [t.id]);
+      if (t.panel_id) { const pt = db.get('SELECT t.department_id, d.name, d.name_fa, d.sort FROM lab_tests t LEFT JOIN lab_departments d ON d.id=t.department_id WHERE t.id=?', [t.panel_id]); if (pt) Object.assign(t, { page_dept: pt.name, page_dept_fa: pt.name_fa, page_sort: pt.sort }); }
+      if (!t.page_dept) Object.assign(t, { page_dept: t.dept_name, page_dept_fa: t.dept_name_fa, page_sort: t.dept_sort });
+    });
     r.tests.sort((a, b) => testIds.findIndex(x => x[0] === a.id) - testIds.findIndex(x => x[0] === b.id));
     return r;
   }
@@ -620,7 +637,7 @@ function makeOps(db, bus) {
       return reqId;
     });
   }
-  function receiveLab(id, p, user) {
+  function receiveLab(id, p, user, station) {
     return db.transaction(() => {
       const r = db.get('SELECT * FROM lab_requests WHERE id=?', [id]); if (!r) fail('درخواست پیدا نشد');
       if (r.status === 'cancelled') fail('این درخواست لغو شده');
@@ -636,18 +653,20 @@ function makeOps(db, bus) {
       const row = { subtotal: r2(sub), discount, net, pay_method: p.pay_method || r.pay_method };
       if (r.status === 'requested') Object.assign(row, { status: 'received', received_at: nowStr(), received_by: user.id });
       db.update('lab_requests', id, row);
-      const pay = p.paid === undefined || p.paid === null || p.paid === '' ? (r.status === 'requested' ? net - r.paid : 0) : n(p.paid);
-      if (pay) { db.insert('lab_payments', { request_id: id, amount: r2(pay), method: p.pay_method || 'cash', created_by: user.id }); db.update('lab_requests', id, { paid: r2(r.paid + pay) }); }
+      const central = setting('cashier_mode', 'central') === 'central' && (station || user.station) === 'lab';
+      const pay = p.paid === undefined || p.paid === null || p.paid === '' ? (r.status === 'requested' && !central ? net - r.paid : 0) : n(p.paid);
+      if (pay) { db.insert('lab_payments', { request_id: id, amount: r2(pay), method: p.pay_method || 'cash', station: station || user.station || null, created_by: user.id }); db.update('lab_requests', id, { paid: r2(r.paid + pay) }); }
+      applyLabConsumption(id, user);
       const out = labFull(id);
       emit('lab:update', { id, lab_code: out.lab_code, status: out.status }, ['lab', 'admin', 'doctor'], { doctor_id: out.doctor_id });
       return out;
     });
   }
-  function payLab(id, amount, method, user) {
+  function payLab(id, amount, method, user, station) {
     return db.transaction(() => {
       const r = db.get('SELECT * FROM lab_requests WHERE id=?', [id]); if (!r) fail('درخواست پیدا نشد');
       const a = r2(amount); if (!a) fail('مبلغ را وارد کنید');
-      db.insert('lab_payments', { request_id: id, amount: a, method: method || 'cash', created_by: user.id });
+      db.insert('lab_payments', { request_id: id, amount: a, method: method || 'cash', station: station || user.station || null, created_by: user.id });
       db.update('lab_requests', id, { paid: r2(r.paid + a) });
       return labFull(id);
     });
@@ -693,12 +712,329 @@ function makeOps(db, bus) {
         db.run('DELETE FROM lab_panel_items WHERE panel_id=?', [id]);
         t.components.forEach((cid, i) => db.insert('lab_panel_items', { panel_id: id, test_id: Number(cid), sort: i + 1 }));
       }
+      if (Array.isArray(t.items)) {
+        db.run('DELETE FROM lab_test_items WHERE test_id=?', [id]);
+        for (const it of t.items) if (it.item_id && n(it.qty) > 0) db.run('INSERT OR REPLACE INTO lab_test_items(test_id,item_id,qty) VALUES(?,?,?)', [id, Number(it.item_id), n(it.qty)]);
+      }
       if (Array.isArray(t.ranges)) {
         db.run('DELETE FROM lab_ranges WHERE test_id=?', [id]);
         for (const r of t.ranges) db.insert('lab_ranges', { test_id: id, sex: ['M', 'F'].includes(r.sex) ? r.sex : 'A', age_min_days: r.age_min_days === '' ? null : r.age_min_days, age_max_days: r.age_max_days === '' ? null : r.age_max_days, low: r.low === '' ? null : r.low, high: r.high === '' ? null : r.high, text: str(r.text) });
       }
       return id;
     });
+  }
+
+
+  // =================================================================== central cashier (reception)
+  function paySale(id, amount, method, note, user, station) {
+    return db.transaction(() => {
+      const s = db.get('SELECT * FROM sales WHERE id=?', [id]); if (!s) fail('فروش پیدا نشد');
+      const a = r2(amount); if (!a) fail('مبلغ را وارد کنید');
+      db.insert('sale_payments', { sale_id: id, amount: a, method: method || 'cash', note: str(note), station: station || user.station || null, created_by: user.id });
+      db.update('sales', id, { paid: r2(s.paid + a) });
+      const out = saleFull(id);
+      emit('sale:paid', { id, sale_code: out.sale_code, rx_code: out.rx_code, patient_name: out.patient_name, paid: out.paid, net: out.net, balance: out.balance }, ['pharmacy', 'stock', 'admin', 'reception']);
+      return out;
+    });
+  }
+  function depositBalance(patientId) { return r2(db.scalar('SELECT IFNULL(SUM(amount),0) FROM patient_deposits WHERE patient_id=?', [patientId])); }
+  function addDeposit(patientId, amount, method, note, user, ref) {
+    const a = r2(amount); if (!a) fail('مبلغ را وارد کنید');
+    if (!db.get('SELECT id FROM patients WHERE id=?', [patientId])) fail('مریض پیدا نشد');
+    if (a < 0 && depositBalance(patientId) + a < -0.001) fail('پول امانت مریض کافی نیست (موجود ' + depositBalance(patientId) + ')');
+    db.insert('patient_deposits', { patient_id: patientId, amount: a, method: method || 'cash', note: str(note), ref_type: ref?.type || null, ref_id: ref?.id || null, station: user.station || null, created_by: user.id });
+    return depositBalance(patientId);
+  }
+  // kind: visit | lab | sale | admission — amount may be negative (refund). from_deposit uses the patient's advance money.
+  function cashierPay(p, user) {
+    return db.transaction(() => {
+      const st = user.station === 'browser' ? 'reception' : (user.station || 'reception');
+      const id = Number(p.id); let amount = r2(p.amount); const method = p.from_deposit ? 'deposit' : (p.method || 'cash');
+      const pid = { visit: 'SELECT patient_id FROM visits WHERE id=?', lab: 'SELECT patient_id FROM lab_requests WHERE id=?', sale: 'SELECT patient_id FROM sales WHERE id=?', admission: 'SELECT patient_id FROM admissions WHERE id=?' }[p.kind];
+      if (!pid) fail('نوع بل نامعتبر');
+      const patientId = db.scalar(pid, [id]);
+      if (p.from_deposit) { if (!patientId) fail('این بل به مریض ثبت شده وصل نیست'); addDeposit(patientId, -amount, 'deposit', 'استفاده از پول امانت', user, { type: p.kind, id }); }
+      let out;
+      if (p.kind === 'visit') out = payVisit(id, amount, method, p.note, user, st);
+      else if (p.kind === 'lab') {
+        const r = db.get('SELECT * FROM lab_requests WHERE id=?', [id]); if (!r) fail('درخواست پیدا نشد');
+        if (r.status === 'requested') out = receiveLab(id, { discount: p.discount, discount_pct: p.discount_pct, test_ids: p.test_ids, paid: amount, pay_method: method }, user, st);
+        else out = payLab(id, amount, method, user, st);
+        emit('lab:paid', { id, lab_code: out.lab_code, paid: out.paid, net: out.net }, ['lab', 'admin', 'reception']);
+      }
+      else if (p.kind === 'sale') out = paySale(id, amount, method, p.note, user, st);
+      else out = payAdmission(id, amount, method, p.note, user, st);
+      return { kind: p.kind, id, data: out, deposit: patientId ? depositBalance(patientId) : 0 };
+    });
+  }
+  function cashierPending() {
+    refreshRunningAdmissions();
+    return {
+      visits: db.all("SELECT * FROM v_visits WHERE status NOT IN ('cancelled') AND ABS(net - paid) > 0.001 ORDER BY visit_date DESC, id DESC LIMIT 300"),
+      labs: db.all("SELECT * FROM v_lab_requests WHERE status<>'cancelled' AND (status='requested' OR net - paid > 0.001) ORDER BY id DESC LIMIT 300"),
+      sales: db.all("SELECT * FROM v_sales WHERE status<>'void' AND ABS(net - returned - paid) > 0.001 ORDER BY id DESC LIMIT 300"),
+      admissions: db.all("SELECT * FROM v_admissions WHERE status<>'cancelled' AND (status='admitted' OR ABS(net - paid) > 0.001) ORDER BY id DESC LIMIT 100")
+    };
+  }
+  function patientAccount(patientId) {
+    const patient = db.get('SELECT * FROM patients WHERE id=?', [patientId]); if (!patient) fail('مریض پیدا نشد');
+    refreshRunningAdmissions();
+    const P = [patientId];
+    const visits = db.all('SELECT * FROM v_visits WHERE patient_id=? ORDER BY id DESC LIMIT 200', P);
+    const labs = db.all("SELECT * FROM v_lab_requests WHERE patient_id=? AND status<>'cancelled' ORDER BY id DESC LIMIT 200", P);
+    const sales = db.all("SELECT * FROM v_sales WHERE patient_id=? AND status<>'void' ORDER BY id DESC LIMIT 200", P);
+    const admissions = db.all("SELECT * FROM v_admissions WHERE patient_id=? AND status<>'cancelled' ORDER BY id DESC LIMIT 50", P);
+    const payments = db.all(`SELECT * FROM (
+      SELECT 'visit' kind, vp.amount, vp.method, vp.note, vp.created_at, v.visit_no code, u.full_name user_name FROM visit_payments vp JOIN visits v ON v.id=vp.visit_id LEFT JOIN users u ON u.id=vp.created_by WHERE v.patient_id=?
+      UNION ALL SELECT 'lab', lp.amount, lp.method, lp.note, lp.created_at, r.lab_code, u.full_name FROM lab_payments lp JOIN lab_requests r ON r.id=lp.request_id LEFT JOIN users u ON u.id=lp.created_by WHERE r.patient_id=?
+      UNION ALL SELECT 'sale', sp.amount, sp.method, sp.note, sp.created_at, s.sale_code, u.full_name FROM sale_payments sp JOIN sales s ON s.id=sp.sale_id LEFT JOIN users u ON u.id=sp.created_by WHERE s.patient_id=?
+      UNION ALL SELECT 'admission', ap.amount, ap.method, ap.note, ap.created_at, a.adm_no, u.full_name FROM admission_payments ap JOIN admissions a ON a.id=ap.admission_id LEFT JOIN users u ON u.id=ap.created_by WHERE a.patient_id=?
+      UNION ALL SELECT 'deposit', d.amount, d.method, d.note, d.created_at, '', u.full_name FROM patient_deposits d LEFT JOIN users u ON u.id=d.created_by WHERE d.patient_id=?
+    ) ORDER BY created_at DESC LIMIT 300`, [patientId, patientId, patientId, patientId, patientId]);
+    const due = r2(visits.reduce((a, v) => a + (v.status === 'cancelled' ? 0 : v.balance), 0) + labs.reduce((a, l) => a + (l.status === 'requested' ? l.subtotal * (1 - l.discount_pct / 100) : l.balance), 0)
+      + sales.reduce((a, x) => a + x.balance, 0) + admissions.reduce((a, x) => a + x.balance, 0));
+    return { patient, visits, labs, sales, admissions, payments, deposit: depositBalance(patientId), due };
+  }
+  // every payment of the day, from every section (reception / pharmacy / laboratory / beds / deposits)
+  function cashierDay(from, to) {
+    if (!isoOk(from)) fail('تاریخ نامعتبر'); to = isoOk(to) ? to : from;
+    const P = [from, to];
+    const payments = db.all(`SELECT * FROM (
+      SELECT 'visit' kind, vp.id, vp.amount, vp.method, vp.note, vp.station, vp.created_at, v.visit_no code, p.full_name, p.code patient_code, IFNULL(d.name, v.service_name) detail, v.doctor_id, u.full_name user_name
+        FROM visit_payments vp JOIN visits v ON v.id=vp.visit_id JOIN patients p ON p.id=v.patient_id LEFT JOIN doctors d ON d.id=v.doctor_id LEFT JOIN users u ON u.id=vp.created_by WHERE DATE(vp.created_at) BETWEEN ? AND ?
+      UNION ALL SELECT 'lab', lp.id, lp.amount, lp.method, lp.note, lp.station, lp.created_at, r.lab_code, p.full_name, p.code, NULL, r.doctor_id, u.full_name
+        FROM lab_payments lp JOIN lab_requests r ON r.id=lp.request_id JOIN patients p ON p.id=r.patient_id LEFT JOIN users u ON u.id=lp.created_by WHERE DATE(lp.created_at) BETWEEN ? AND ?
+      UNION ALL SELECT 'sale', sp.id, sp.amount, sp.method, sp.note, sp.station, sp.created_at, s.sale_code, IFNULL(p.full_name, s.patient_name), p.code, s.rx_code, s.doctor_id, u.full_name
+        FROM sale_payments sp JOIN sales s ON s.id=sp.sale_id LEFT JOIN patients p ON p.id=s.patient_id LEFT JOIN users u ON u.id=sp.created_by WHERE DATE(sp.created_at) BETWEEN ? AND ?
+      UNION ALL SELECT 'admission', ap.id, ap.amount, ap.method, ap.note, ap.station, ap.created_at, a.adm_no, p.full_name, p.code, NULL, a.doctor_id, u.full_name
+        FROM admission_payments ap JOIN admissions a ON a.id=ap.admission_id JOIN patients p ON p.id=a.patient_id LEFT JOIN users u ON u.id=ap.created_by WHERE DATE(ap.created_at) BETWEEN ? AND ?
+      UNION ALL SELECT 'deposit', dp.id, dp.amount, dp.method, dp.note, dp.station, dp.created_at, '', p.full_name, p.code, NULL, NULL, u.full_name
+        FROM patient_deposits dp JOIN patients p ON p.id=dp.patient_id LEFT JOIN users u ON u.id=dp.created_by WHERE DATE(dp.created_at) BETWEEN ? AND ? AND dp.method<>'deposit'
+    ) ORDER BY created_at`, [...P, ...P, ...P, ...P, ...P]);
+    const cash = payments.filter(x => x.method !== 'deposit');
+    const sum = (f) => r2(cash.filter(f).reduce((a, x) => a + x.amount, 0));
+    const byDoctor = db.all(`SELECT d.id, d.name, d.title, COUNT(DISTINCT v.id) visits, IFNULL(SUM(vp.amount),0) amount FROM visit_payments vp JOIN visits v ON v.id=vp.visit_id LEFT JOIN doctors d ON d.id=v.doctor_id
+      WHERE DATE(vp.created_at) BETWEEN ? AND ? AND IFNULL(vp.method,'')<>'deposit' GROUP BY d.id ORDER BY amount DESC`, P);
+    const withdrawals = db.all('SELECT * FROM withdrawals WHERE date BETWEEN ? AND ? ORDER BY id', P);
+    const expenses = r2(db.scalar('SELECT IFNULL(SUM(paid),0) FROM expenses WHERE date BETWEEN ? AND ?', P));
+    const totals = { visit: sum(x => x.kind === 'visit'), lab: sum(x => x.kind === 'lab'), sale: sum(x => x.kind === 'sale'), admission: sum(x => x.kind === 'admission'), deposit: sum(x => x.kind === 'deposit'),
+      refunds: r2(-cash.filter(x => x.amount < 0).reduce((a, x) => a + x.amount, 0)), at_reception: sum(x => !x.station || x.station === 'reception' || x.station === 'browser' || x.station === 'admin'),
+      at_sections: sum(x => x.station && !['reception', 'browser', 'admin'].includes(x.station)) };
+    totals.all = r2(totals.visit + totals.lab + totals.sale + totals.admission + totals.deposit);
+    totals.withdrawals = r2(withdrawals.reduce((a, w) => a + w.amount, 0));
+    totals.expenses = expenses;
+    totals.net = r2(totals.all - totals.withdrawals - expenses);
+    const closes = db.all('SELECT c.*, u.full_name user_name FROM cash_closes c LEFT JOIN users u ON u.id=c.created_by WHERE c.date BETWEEN ? AND ? ORDER BY c.id', P);
+    const open = cashierPending();
+    const outstanding = { visits: r2(open.visits.filter(v => v.balance > 0).reduce((a, v) => a + v.balance, 0)), refunds_due: r2(-open.visits.filter(v => v.balance < 0).reduce((a, v) => a + v.balance, 0)),
+      labs: r2(open.labs.reduce((a, l) => a + (l.status === 'requested' ? 0 : l.balance), 0)), labs_to_bill: open.labs.filter(l => l.status === 'requested').length,
+      sales: r2(open.sales.reduce((a, x) => a + Math.max(0, x.balance), 0)), admissions: r2(open.admissions.reduce((a, x) => a + Math.max(0, x.balance), 0)) };
+    return { from, to, payments, totals, byDoctor, withdrawals, closes, outstanding };
+  }
+  function cashClose(p, user) {
+    const d = isoOk(p.date) ? p.date : today();
+    const day = cashierDay(d, d);
+    const expected = r2(p.expected ?? day.totals.net);
+    const counted = r2(p.counted);
+    const id = db.insert('cash_closes', { date: d, station: user.station || 'reception', expected, counted, difference: r2(counted - expected), handed_to: str(p.handed_to), note: str(p.note), created_by: user.id });
+    return db.get('SELECT * FROM cash_closes WHERE id=?', [id]);
+  }
+
+  // =================================================================== laboratory materials (reagents) & automatic use per test
+  function labItemMove(m, user) {
+    return db.transaction(() => {
+      const it = db.get('SELECT * FROM lab_items WHERE id=?', [m.item_id]); if (!it) fail('مواد پیدا نشد');
+      let qty = n(m.qty); if (!qty) fail('مقدار را وارد کنید');
+      const kind = ['in', 'adjust', 'expired', 'use', 'return'].includes(m.kind) ? m.kind : 'adjust';
+      if (['expired', 'use'].includes(kind) && qty > 0) qty = -qty;
+      db.insert('lab_item_moves', { date: isoOk(m.date) ? m.date : today(), item_id: it.id, qty, kind, unit_cost: m.unit_cost === '' || m.unit_cost == null ? it.cost : n(m.unit_cost), note: str(m.note), user_id: user.id });
+      const row = { stock: r2(it.stock + qty) };
+      if (kind === 'in' && m.unit_cost !== '' && m.unit_cost != null) row.cost = n(m.unit_cost);
+      if (kind === 'in' && m.expiry) row.expiry = str(m.expiry);
+      db.update('lab_items', it.id, row);
+      return db.get('SELECT * FROM lab_items WHERE id=?', [it.id]);
+    });
+  }
+  // brings the materials used by one lab request in line with its tests (idempotent: posts only the difference)
+  function applyLabConsumption(reqId, user) {
+    const r = db.get('SELECT * FROM lab_requests WHERE id=?', [reqId]); if (!r) return;
+    const want = new Map();
+    if (!['requested', 'cancelled'].includes(r.status)) {
+      const testIds = [];
+      for (const it of db.all('SELECT i.test_id, t.is_panel FROM lab_request_items i JOIN lab_tests t ON t.id=i.test_id WHERE i.request_id=?', [reqId])) {
+        testIds.push(it.test_id);
+        if (it.is_panel) db.all('SELECT pi.test_id FROM lab_panel_items pi JOIN lab_tests t ON t.id=pi.test_id WHERE pi.panel_id=? AND t.active=1', [it.test_id]).forEach(x => testIds.push(x.test_id));
+      }
+      for (const tid of testIds) for (const c of db.all('SELECT * FROM lab_test_items WHERE test_id=?', [tid])) want.set(c.item_id, r2((want.get(c.item_id) || 0) + c.qty));
+    }
+    const have = new Map(db.all("SELECT item_id, -SUM(qty) q FROM lab_item_moves WHERE ref_type='lab_request' AND ref_id=? GROUP BY item_id", [reqId]).map(x => [x.item_id, x.q]));
+    const ids = new Set([...want.keys(), ...have.keys()]);
+    for (const itemId of ids) {
+      const diff = r2((want.get(itemId) || 0) - (have.get(itemId) || 0));
+      if (Math.abs(diff) < 0.0001) continue;
+      const it = db.get('SELECT * FROM lab_items WHERE id=?', [itemId]); if (!it) continue;
+      db.insert('lab_item_moves', { date: today(), item_id: itemId, qty: -diff, kind: diff > 0 ? 'use' : 'return', unit_cost: it.cost, ref_type: 'lab_request', ref_id: reqId, note: r.lab_code, user_id: user?.id || null });
+      db.update('lab_items', itemId, { stock: r2(it.stock - diff) });
+      const after = it.stock - diff;
+      if (diff > 0 && it.reorder_level > 0 && after <= it.reorder_level) emit('labitem:low', { id: it.id, name: it.name, stock: r2(after) }, ['lab', 'stock', 'admin']);
+    }
+  }
+
+  // =================================================================== in-patients (beds)
+  function admissionDays(startAt, endAt) {
+    const h = (new Date(String(endAt).replace(' ', 'T')) - new Date(String(startAt).replace(' ', 'T'))) / 3600000;
+    return Math.max(0, Math.ceil((h - 2) / 24));            // part of a day after 2 hours counts as a day
+  }
+  function admissionFull(id) {
+    const a = db.get('SELECT * FROM v_admissions WHERE id=?', [id]); if (!a) fail('بستری پیدا نشد');
+    a.beds = db.all('SELECT ab.*, b.name bed, w.name ward FROM admission_beds ab JOIN beds b ON b.id=ab.bed_id JOIN wards w ON w.id=b.ward_id WHERE ab.admission_id=? ORDER BY ab.id', [id]);
+    const now = nowStr();
+    a.beds.forEach(b => { b.calc_days = b.days ?? Math.max(0, admissionDays(b.start_at, b.end_at || now)); });
+    if (a.status === 'admitted' && a.beds.length && !a.beds.some(b => b.calc_days > 0)) a.beds[0].calc_days = 1;
+    a.charges = db.all('SELECT c.*, u.full_name user_name FROM admission_charges c LEFT JOIN users u ON u.id=c.created_by WHERE admission_id=? ORDER BY id', [id]);
+    a.payments = db.all('SELECT p.*, u.full_name user_name FROM admission_payments p LEFT JOIN users u ON u.id=p.created_by WHERE admission_id=? ORDER BY id', [id]);
+    a.bed_running = r2(a.beds.reduce((s2, b) => s2 + b.calc_days * b.rate, 0));
+    a.extra_running = r2(a.charges.reduce((s2, c) => s2 + c.amount, 0));
+    a.patient = db.get('SELECT * FROM patients WHERE id=?', [a.patient_id]);
+    return a;
+  }
+  function recomputeAdmission(id) {
+    const a = admissionFull(id);
+    const bed = a.status === 'admitted' ? a.bed_running : a.bed_total;
+    const row = { bed_total: bed, extra_total: a.extra_running, net: r2(Math.max(0, bed + a.extra_running - a.discount)) };
+    if (row.bed_total !== a.bed_total || row.extra_total !== a.extra_total || row.net !== a.net) db.update('admissions', id, row);
+  }
+  // bed days keep running while the patient is admitted: bring the stored totals up to date
+  function refreshRunningAdmissions() { for (const a of db.all("SELECT id FROM admissions WHERE status='admitted'")) recomputeAdmission(a.id); }
+  function bedFree(bedId) { return !db.get("SELECT ab.id FROM admission_beds ab JOIN admissions a ON a.id=ab.admission_id WHERE ab.bed_id=? AND ab.end_at IS NULL AND a.status='admitted'", [bedId]); }
+  function admit(p, user) {
+    return db.transaction(() => {
+      let patientId = p.patient_id;
+      if (p.patient) patientId = savePatient({ ...p.patient, id: patientId || undefined }, user);
+      if (!patientId) fail('مریض را انتخاب یا ثبت کنید');
+      if (db.get("SELECT id FROM admissions WHERE patient_id=? AND status='admitted'", [patientId])) fail('این مریض همین حالا بستری است');
+      const bed = db.get('SELECT b.*, w.daily_rate FROM beds b JOIN wards w ON w.id=b.ward_id WHERE b.id=?', [p.bed_id]); if (!bed) fail('تخت را انتخاب کنید');
+      if (!bedFree(bed.id)) fail('این تخت خالی نیست');
+      const now = nowStr();
+      const prefix = setting('admission_prefix', 'IP-');
+      let no; for (let i = 0; i < 100; i++) { no = prefix + String(db.nextCounter('admission')).padStart(5, '0'); if (!db.get('SELECT id FROM admissions WHERE adm_no=?', [no])) break; }
+      const id = db.insert('admissions', { adm_no: no, patient_id: patientId, doctor_id: p.doctor_id || null, admitted_at: now, diagnosis: str(p.diagnosis), notes: str(p.notes), created_by: user.id });
+      db.insert('admission_beds', { admission_id: id, bed_id: bed.id, rate: p.rate === undefined || p.rate === '' ? bed.daily_rate : n(p.rate), start_at: now });
+      if (n(p.deposit) > 0) { db.insert('admission_payments', { admission_id: id, amount: r2(p.deposit), method: p.method || 'cash', note: 'پیش‌پرداخت بستر', station: user.station || 'reception', created_by: user.id }); db.update('admissions', id, { paid: r2(p.deposit) }); }
+      recomputeAdmission(id);
+      const out = admissionFull(id);
+      emit('ipd:update', { id, adm_no: no, full_name: out.full_name }, ['reception', 'doctor', 'admin'], { doctor_id: out.doctor_id });
+      return out;
+    });
+  }
+  function transferBed(id, bedId, user) {
+    return db.transaction(() => {
+      const a = db.get('SELECT * FROM admissions WHERE id=?', [id]); if (!a || a.status !== 'admitted') fail('بستری فعال پیدا نشد');
+      const bed = db.get('SELECT b.*, w.daily_rate FROM beds b JOIN wards w ON w.id=b.ward_id WHERE b.id=?', [bedId]); if (!bed) fail('تخت پیدا نشد');
+      if (!bedFree(bed.id)) fail('این تخت خالی نیست');
+      const now = nowStr();
+      db.run('UPDATE admission_beds SET end_at=? WHERE admission_id=? AND end_at IS NULL', [now, id]);
+      db.insert('admission_beds', { admission_id: id, bed_id: bed.id, rate: bed.daily_rate, start_at: now });
+      recomputeAdmission(id); emit('ipd:update', { id }, ['reception', 'doctor', 'admin']);
+      return admissionFull(id);
+    });
+  }
+  function addAdmissionCharge(id, c, user) {
+    return db.transaction(() => {
+      const a = db.get('SELECT * FROM admissions WHERE id=?', [id]); if (!a) fail('بستری پیدا نشد');
+      if (c.remove) db.run('DELETE FROM admission_charges WHERE id=? AND admission_id=?', [c.remove, id]);
+      else { if (!str(c.name) || !n(c.amount)) fail('نام و مبلغ را وارد کنید'); db.insert('admission_charges', { admission_id: id, name: str(c.name), amount: r2(c.amount), created_by: user.id }); }
+      recomputeAdmission(id); return admissionFull(id);
+    });
+  }
+  function dischargeAdmission(id, p, user) {
+    return db.transaction(() => {
+      const a = admissionFull(id); if (a.status !== 'admitted') fail('این مریض قبلاً رخصت شده');
+      const now = nowStr();
+      // allow the receptionist to correct the number of days of each bed before closing
+      for (const b of a.beds) {
+        const days = p.days && p.days[b.id] !== undefined && p.days[b.id] !== '' ? n(p.days[b.id]) : b.calc_days;
+        db.update('admission_beds', b.id, { end_at: b.end_at || now, days });
+      }
+      const bedTotal = r2(db.scalar('SELECT IFNULL(SUM(days*rate),0) FROM admission_beds WHERE admission_id=?', [id]));
+      db.update('admissions', id, { status: 'discharged', discharged_at: now, bed_total: bedTotal, discount: Math.max(0, n(p.discount)), notes: str(p.notes) ?? a.notes });
+      recomputeAdmission(id);
+      const out = admissionFull(id);
+      emit('ipd:update', { id, status: 'discharged' }, ['reception', 'doctor', 'admin']);
+      return out;
+    });
+  }
+  function payAdmission(id, amount, method, note, user, station) {
+    return db.transaction(() => {
+      const a = db.get('SELECT * FROM admissions WHERE id=?', [id]); if (!a) fail('بستری پیدا نشد');
+      const amt = r2(amount); if (!amt) fail('مبلغ را وارد کنید');
+      db.insert('admission_payments', { admission_id: id, amount: amt, method: method || 'cash', note: str(note), station: station || user.station || null, created_by: user.id });
+      db.update('admissions', id, { paid: r2(a.paid + amt) });
+      return admissionFull(id);
+    });
+  }
+  function ipdBoard() {
+    const wards = db.all('SELECT * FROM wards WHERE active=1 ORDER BY sort, id');
+    const beds = db.all('SELECT * FROM beds WHERE active=1 ORDER BY sort, id');
+    const occ = db.all(`SELECT ab.bed_id, a.id admission_id, a.adm_no, a.admitted_at, a.diagnosis, p.full_name, p.father_name, p.code patient_code, p.sex, p.birth_date, d.name doctor_name
+      FROM admission_beds ab JOIN admissions a ON a.id=ab.admission_id JOIN patients p ON p.id=a.patient_id LEFT JOIN doctors d ON d.id=a.doctor_id WHERE ab.end_at IS NULL AND a.status='admitted'`);
+    const om = new Map(occ.map(o => [o.bed_id, o]));
+    return wards.map(w => ({ ...w, beds: beds.filter(b => b.ward_id === w.id).map(b => ({ ...b, occupant: om.get(b.id) || null })) }));
+  }
+
+  // =================================================================== stock: purchase suggestions (auto reorder)
+  function reorderSuggestions() {
+    const from = (() => { const d = new Date(); d.setDate(d.getDate() - 30); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; })();
+    const sold = new Map(db.all("SELECT si.medicine_id id, SUM(si.qty - si.returned_qty) q FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE s.date >= ? AND s.status<>'void' GROUP BY si.medicine_id", [from]).map(r => [r.id, r.q]));
+    return db.all('SELECT * FROM v_medicine_stock WHERE active=1 AND (stock <= reorder_level) ORDER BY name').map(m => {
+      const per30 = r2(sold.get(m.id) || 0);
+      const suggest = Math.max(Math.ceil(per30 * 1.2 - m.stock), Math.ceil(m.reorder_level * 3 - m.stock), 1);
+      const last = db.get('SELECT p.supplier_id, s.name supplier_name, i.buy_price, p.date FROM purchase_items i JOIN purchases p ON p.id=i.purchase_id LEFT JOIN suppliers s ON s.id=p.supplier_id WHERE i.medicine_id=? ORDER BY p.date DESC, p.id DESC LIMIT 1', [m.id]);
+      return { ...m, sold_30: per30, suggest, last_supplier_id: last?.supplier_id || null, last_supplier: last?.supplier_name || null, last_buy: last?.buy_price ?? m.buy_price };
+    });
+  }
+
+  // =================================================================== doctors: schedule & load for a date
+  function doctorLoad(date) {
+    date = isoOk(date) ? date : today();
+    const wd = new Date(date + 'T12:00:00').getDay();
+    const counts = new Map(db.all("SELECT doctor_id, COUNT(*) c FROM visits WHERE visit_date=? AND status NOT IN ('cancelled','no_show') GROUP BY doctor_id", [date]).map(r => [r.doctor_id, r.c]));
+    const waiting = new Map(db.all("SELECT doctor_id, COUNT(*) c FROM visits WHERE visit_date=? AND status='waiting' GROUP BY doctor_id", [date]).map(r => [r.doctor_id, r.c]));
+    const sched = db.all('SELECT * FROM doctor_schedules');
+    return db.all('SELECT * FROM v_doctors ORDER BY sort, id').map(d => {
+      const mine = sched.filter(x => x.doctor_id === d.id);
+      const today_s = mine.filter(x => x.weekday === wd);
+      return { ...d, schedule: mine, works_today: !mine.length || today_s.length > 0, today_schedule: today_s, max_patients: today_s.reduce((a, x) => a + (x.max_patients || 0), 0) || null, booked: counts.get(d.id) || 0, waiting: waiting.get(d.id) || 0 };
+    });
+  }
+  function saveDoctorSchedule(doctorId, rows) {
+    return db.transaction(() => {
+      db.run('DELETE FROM doctor_schedules WHERE doctor_id=?', [doctorId]);
+      for (const r of rows || []) if (r.weekday !== undefined && r.weekday !== '') db.insert('doctor_schedules', { doctor_id: doctorId, weekday: Number(r.weekday), start_time: str(r.start_time), end_time: str(r.end_time), max_patients: r.max_patients ? n(r.max_patients) : null });
+      return db.all('SELECT * FROM doctor_schedules WHERE doctor_id=? ORDER BY weekday', [doctorId]);
+    });
+  }
+  // =================================================================== waiting-room display
+  function queueDisplay() {
+    const rows = db.all("SELECT v.id, v.turn_no, v.status, v.called_at, v.doctor_id, v.service_name, p.full_name, d.name doctor_name, d.title doctor_title, d.room FROM visits v JOIN patients p ON p.id=v.patient_id LEFT JOIN doctors d ON d.id=v.doctor_id WHERE v.visit_date=? AND v.status IN ('waiting','in_visit') ORDER BY v.turn_no", [today()]);
+    const groups = new Map();
+    for (const r of rows) {
+      const k = r.doctor_id ? 'd' + r.doctor_id : 's' + r.service_name;
+      if (!groups.has(k)) groups.set(k, { key: k, title: r.doctor_id ? `${r.doctor_title || ''} ${r.doctor_name}`.trim() : r.service_name, room: r.room || '', current: null, waiting: [] });
+      const g = groups.get(k);
+      const name = String(r.full_name || '').split(' ')[0];
+      if (r.status === 'in_visit') { if (!g.current || (r.called_at || '') > (g.current.called_at || '')) g.current = { turn: r.turn_no, name, called_at: r.called_at }; }
+      else g.waiting.push({ turn: r.turn_no, name });
+    }
+    return [...groups.values()];
+  }
+  function callVisit(id, user) {
+    const v = db.get('SELECT v.*, p.full_name, d.name doctor_name, d.title doctor_title, d.room FROM visits v JOIN patients p ON p.id=v.patient_id LEFT JOIN doctors d ON d.id=v.doctor_id WHERE v.id=?', [id]); if (!v) fail('پذیرش پیدا نشد');
+    db.update('visits', id, { status: v.status === 'waiting' || v.status === 'in_visit' ? 'in_visit' : v.status, called_at: nowStr() });
+    const data = { id, turn: v.turn_no, name: String(v.full_name || '').split(' ')[0], doctor: `${v.doctor_title || ''} ${v.doctor_name || v.service_name}`.trim(), room: v.room || '', doctor_id: v.doctor_id };
+    emit('queue:call', data, undefined);
+    emit('visit:update', db.get('SELECT * FROM v_visits WHERE id=?', [id]), ['reception', 'doctor', 'admin'], { doctor_id: v.doctor_id });
+    return data;
   }
 
   // =================================================================== reports
@@ -712,7 +1048,7 @@ function makeOps(db, bus) {
     if (!isoOk(from) || !isoOk(to)) fail('بازه تاریخ نامعتبر');
     const P = [from, to];
     const map = new Map();
-    const row = (d) => { if (!map.has(d)) map.set(d, { date: d, visits: 0, reception: 0, ph_sales: 0, ph_returns: 0, ph_cost: 0, ph_count: 0, lab_income: 0, lab_billed: 0, lab_count: 0, expenses: 0, wd_pharmacy: 0, wd_lab: 0, wd_reception: 0, wd_personal: 0, purchases: 0, supplier_paid: 0, legacy_ph: 0, legacy_lab: 0 }); return map.get(d); };
+    const row = (d) => { if (!map.has(d)) map.set(d, { date: d, ph_cash: 0, ipd: 0, visits: 0, reception: 0, ph_sales: 0, ph_returns: 0, ph_cost: 0, ph_count: 0, lab_income: 0, lab_billed: 0, lab_count: 0, expenses: 0, wd_pharmacy: 0, wd_lab: 0, wd_reception: 0, wd_personal: 0, purchases: 0, supplier_paid: 0, legacy_ph: 0, legacy_lab: 0 }); return map.get(d); };
     const add = (sql, f) => db.all(sql, P).forEach(r => f(row(r.d), r));
     add("SELECT visit_date d, COUNT(*) c FROM visits WHERE visit_date BETWEEN ? AND ? AND status NOT IN ('cancelled','reserved') GROUP BY d", (o, r) => o.visits = r.c);
     add('SELECT DATE(created_at) d, SUM(amount) s FROM visit_payments WHERE DATE(created_at) BETWEEN ? AND ? GROUP BY d', (o, r) => o.reception = r.s);
@@ -724,6 +1060,8 @@ function makeOps(db, bus) {
     add("SELECT date d, SUM(CASE WHEN kind='personal' THEN amount ELSE 0 END) p, SUM(CASE WHEN kind<>'personal' AND section='pharmacy' THEN amount ELSE 0 END) ph, SUM(CASE WHEN kind<>'personal' AND section='lab' THEN amount ELSE 0 END) lb, SUM(CASE WHEN kind<>'personal' AND section='reception' THEN amount ELSE 0 END) rc FROM withdrawals WHERE date BETWEEN ? AND ? GROUP BY d",
       (o, r) => { o.wd_personal = r.p; o.wd_pharmacy = r.ph; o.wd_lab = r.lb; o.wd_reception = r.rc; });
     add('SELECT date d, SUM(net) s FROM purchases WHERE date BETWEEN ? AND ? GROUP BY d', (o, r) => o.purchases = r.s);
+    add("SELECT DATE(created_at) d, SUM(amount) s FROM sale_payments WHERE DATE(created_at) BETWEEN ? AND ? AND IFNULL(method,'')<>'deposit' GROUP BY d", (o, r) => o.ph_cash = r.s);
+    add("SELECT DATE(created_at) d, SUM(amount) s FROM admission_payments WHERE DATE(created_at) BETWEEN ? AND ? AND IFNULL(method,'')<>'deposit' GROUP BY d", (o, r) => o.ipd = r.s);
     add('SELECT date d, SUM(amount) s FROM purchase_payments WHERE date BETWEEN ? AND ? GROUP BY d', (o, r) => o.supplier_paid = r.s);
     add('SELECT date d, pharmacy_sales s, lab_income l FROM legacy_daily WHERE date BETWEEN ? AND ?', (o, r) => { o.legacy_ph = r.s; o.legacy_lab = r.l; });
     const out = [...map.values()].sort((a, b) => a.date < b.date ? -1 : 1);
@@ -732,7 +1070,7 @@ function makeOps(db, bus) {
       o.ph_net = r2(o.ph_sales - o.ph_returns + o.legacy_ph);           // pharmacy sales after returns (+ imported history)
       o.ph_profit = r2(o.ph_sales - o.ph_returns - o.ph_cost);
       o.lab_total = r2(o.lab_income + o.legacy_lab);
-      o.income = r2(o.reception + o.ph_net + o.lab_total);
+      o.income = r2(o.reception + o.ph_net + o.lab_total + o.ipd);
       o.withdrawals = r2(o.wd_pharmacy + o.wd_lab + o.wd_reception + o.wd_personal);
       o.cash_left = r2(o.income - o.withdrawals - o.expenses);
     }
@@ -781,7 +1119,10 @@ function makeOps(db, bus) {
     return {
       today: t, month_start: monthStart,
       today_row: todayRow,
-      month: { reception: sum('reception'), ph_net: sum('ph_net'), ph_profit: sum('ph_profit'), lab_total: sum('lab_total'), expenses: sum('expenses'), income: sum('income'), withdrawals: sum('withdrawals'), purchases: sum('purchases') },
+      month: { reception: sum('reception'), ph_net: sum('ph_net'), ph_profit: sum('ph_profit'), lab_total: sum('lab_total'), ipd: sum('ipd'), expenses: sum('expenses'), income: sum('income'), withdrawals: sum('withdrawals'), purchases: sum('purchases') },
+      admitted: db.scalar("SELECT COUNT(*) FROM admissions WHERE status='admitted'"),
+      cashier_pending: db.get("SELECT (SELECT COUNT(*) FROM v_sales WHERE status<>'void' AND net-returned-paid>0.001) sales, (SELECT COUNT(*) FROM lab_requests WHERE status='requested') labs, (SELECT COUNT(*) FROM visits WHERE status<>'cancelled' AND net-paid>0.001) visits"),
+      lab_items_low: db.scalar('SELECT COUNT(*) FROM lab_items WHERE active=1 AND reorder_level>0 AND stock<=reorder_level'),
       visits_by_status: Object.fromEntries(visits.map(v => [v.status, v.c])),
       rx_pending: db.scalar("SELECT COUNT(*) FROM prescriptions WHERE status IN ('new','partial') AND date >= date('now','localtime','-7 days')"),
       lab_pending: db.scalar("SELECT COUNT(*) FROM lab_requests WHERE status IN ('requested','received','completed')"),
@@ -797,7 +1138,10 @@ function makeOps(db, bus) {
     patientFile, saveEncounter, getRx, createSale, saleFull, returnSale, findByCode,
     saveMedicine, savePurchase, purchaseFull, addPurchasePayment, deletePurchasePayment, deletePurchase, adjustStock,
     labFull, createLabWalkin, receiveLab, payLab, saveLabResults, saveLabTest, labRequestsFull,
-    reportDays, medicineSales, supplierLedger, doctorStats, stockSummary, dashboard, medicineStock, dayRange
+    reportDays, medicineSales, supplierLedger, doctorStats, stockSummary, dashboard, medicineStock, dayRange,
+    alternatives, paySale, addDeposit, depositBalance, cashierPay, cashierPending, patientAccount, cashierDay, cashClose,
+    labItemMove, applyLabConsumption, admit, transferBed, addAdmissionCharge, dischargeAdmission, payAdmission, admissionFull, ipdBoard,
+    reorderSuggestions, doctorLoad, saveDoctorSchedule, queueDisplay, callVisit
   };
 }
 

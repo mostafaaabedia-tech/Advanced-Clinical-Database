@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; connect-src 'self'; media-src 'self' data:">
+  <title>نمایش نوبت</title>
+  <link rel="icon" href="img/logo.png">
+  <link rel="stylesheet" href="css/app.css">
+  <style>
+    html, body { background: #0b1220; color: #e5edf7; height: 100%; overflow: hidden; }
+    .dHead { display: flex; align-items: center; gap: 18px; padding: 14px 28px; background: linear-gradient(90deg, #0f2747, #12385f); box-shadow: 0 2px 14px rgba(0,0,0,.4); }
+    .dHead img { width: 64px; height: 64px; object-fit: contain; background: #fff; border-radius: 14px; padding: 4px; }
+    .dHead h1 { margin: 0; font-size: 30px; font-weight: 700; }
+    .dHead .clk { margin-inline-start: auto; text-align: left; font-size: 22px; font-variant-numeric: tabular-nums; }
+    .dHead .clk b { display: block; font-size: 38px; }
+    .dGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 18px; padding: 22px 28px; height: calc(100% - 160px); overflow: hidden; align-content: start; }
+    .dCard { background: #121c2f; border: 1px solid #22314d; border-radius: 22px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+    .dCard h2 { margin: 0; font-size: 24px; color: #9cc9ff; }
+    .dCard .room { color: #94a3b8; font-size: 16px; }
+    .dNow { background: #0f7a3a; border-radius: 16px; text-align: center; padding: 10px; }
+    .dNow small { display: block; font-size: 16px; opacity: .85; }
+    .dNow b { display: block; font-size: 76px; line-height: 1.05; font-variant-numeric: tabular-nums; }
+    .dNow span { font-size: 22px; }
+    .dNow.none { background: #1e293b; } .dNow.none b { font-size: 40px; padding: 18px 0; }
+    .dNext { display: flex; gap: 8px; flex-wrap: wrap; }
+    .dNext span { background: #1e293b; border-radius: 10px; padding: 6px 12px; font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .dNext em { font-style: normal; font-size: 14px; color: #94a3b8; font-weight: 400; margin-inline-start: 4px; }
+    .dFoot { position: fixed; bottom: 0; left: 0; right: 0; padding: 10px 28px; background: #0f2747; font-size: 18px; color: #cbd5e1; display: flex; justify-content: space-between; }
+    .dCall { position: fixed; inset: 0; background: rgba(4, 10, 24, .92); display: flex; align-items: center; justify-content: center; z-index: 50; }
+    .dCall.hidden { display: none; }
+    .dCall .box { background: linear-gradient(160deg, #15803d, #0f5f2e); border-radius: 36px; padding: 40px 90px; text-align: center; box-shadow: 0 0 80px rgba(34,197,94,.45); animation: pop .5s ease; }
+    .dCall .box small { font-size: 34px; display: block; }
+    .dCall .box b { font-size: 220px; line-height: 1; display: block; font-variant-numeric: tabular-nums; }
+    .dCall .box div { font-size: 40px; margin-top: 10px; }
+    .dCall .box .rm { font-size: 30px; opacity: .9; }
+    @keyframes pop { from { transform: scale(.6); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+    .dLogin { max-width: 380px; margin: 12vh auto; background: #121c2f; border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 10px; }
+    .dLogin input { padding: 10px; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: #fff; }
+    .dLogin button { padding: 10px; border-radius: 8px; border: 0; background: #2563eb; color: #fff; font-weight: 700; cursor: pointer; }
+    .dSound { position: fixed; bottom: 56px; left: 16px; z-index: 60; background: #b45309; color: #fff; border: 0; border-radius: 10px; padding: 8px 14px; cursor: pointer; font-size: 15px; }
+    .dEmpty { grid-column: 1 / -1; text-align: center; font-size: 30px; color: #64748b; padding-top: 12vh; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="js/display.js"></script>
+</body>
+</html>

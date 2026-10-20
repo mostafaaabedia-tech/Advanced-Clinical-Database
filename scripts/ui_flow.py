@@ -27,8 +27,8 @@ with sync_playwright() as p:
   b = p.chromium.launch()
   # ---------------- reception: new patient + OPD visit
   ctx, rc = station(b, 'reception', 'reception', '1111')
-  rc.fill('#f_name', 'رحیمه'); rc.fill('[name=father_name]', 'عبدالله'); rc.click('#sexChips [data-sex=F]'); rc.fill('[name=age_years]', '27'); rc.fill('[name=phone]', '0790000001')
-  rc.click('#drChips [data-dr]:nth-child(2)')
+  rc.fill('#f_name', 'رحیمه'); rc.fill('[name=father_name]', 'عبدالله'); rc.click('#sexChips [data-sex=F]'); rc.fill('[data-age=rcAge] [data-a=y]', '27'); rc.fill('[name=phone]', '0790000001')
+  rc.click('#rcDr .drPickBtn'); rc.wait_for_timeout(400); rc.click('#rcDr .drPickItem:has-text("خطیبی")')
   rc.click('[data-act=save]:not([data-print])'); rc.wait_for_timeout(1200)
   rc.evaluate("go('visits')"); rc.wait_for_timeout(1000); shot(rc, 'flow-01-reception-queue')
   rc.click('#vBody tr:last-child [data-act=menu]'); rc.wait_for_timeout(500)
@@ -83,6 +83,7 @@ with sync_playwright() as p:
   lb.click('#lb .rxCard:last-child'); lb.wait_for_timeout(1200)
   shot(lb, 'flow-11-lab-billing')
   lb.click('[data-act=receive]:not([data-print])'); lb.wait_for_timeout(1500)
+  if lb.query_selector('#dTabs [data-pg=all]'): lb.click('#dTabs [data-pg=all]'); lb.wait_for_timeout(300)
   inputs = lb.query_selector_all('input[data-tid]:not([readonly])')
   vals = ['11.2', '4.3', '8.9', '34', '78', '26', '33', '210', '62', '30', '6', '2']
   for i, el in enumerate(inputs[:len(vals)]): el.fill(vals[i])

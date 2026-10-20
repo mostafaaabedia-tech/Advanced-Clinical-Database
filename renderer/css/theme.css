@@ -1,0 +1,179 @@
+/* Dark mode (html[data-theme=dark]) + components added in v2. Printed documents always stay white. */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b1220; --surface: #111827; --surface-2: #0f172a; --line: #233044; --line-2: #334155;
+  --text: #e5e7eb; --text-2: #cbd5e1; --muted: #94a3b8;
+  --good: #34d399; --good-soft: #0d2b22; --warn: #fbbf24; --warn-soft: #2a2110; --bad: #f87171; --bad-soft: #2c1515;
+  --info: #60a5fa; --info-soft: #0f2238; --violet: #a78bfa; --violet-soft: #1d1836;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .25);
+}
+html[data-theme="dark"] body { background: var(--bg); }
+html[data-theme="dark"] input[type=text], html[data-theme="dark"] input[type=number], html[data-theme="dark"] input[type=password], html[data-theme="dark"] input[type=date],
+html[data-theme="dark"] input[type=search], html[data-theme="dark"] input[type=tel], html[data-theme="dark"] input[type=time], html[data-theme="dark"] input[type=month],
+html[data-theme="dark"] input:not([type]), html[data-theme="dark"] select, html[data-theme="dark"] textarea { background: #0b1324; color: var(--text); border-color: var(--line-2); }
+html[data-theme="dark"] input[readonly] { background: var(--surface-2); color: var(--text-2); }
+html[data-theme="dark"] .btn, html[data-theme="dark"] .chip, html[data-theme="dark"] .svcChip, html[data-theme="dark"] .modal, html[data-theme="dark"] .dropdown,
+html[data-theme="dark"] .datePop, html[data-theme="dark"] .netNode, html[data-theme="dark"] .histItem, html[data-theme="dark"] .inbox .rxCard,
+html[data-theme="dark"] table.t, html[data-theme="dark"] .drPickPop, html[data-theme="dark"] .bedCard, html[data-theme="dark"] .billCard { background: var(--surface); color: var(--text); }
+html[data-theme="dark"] .btn:hover, html[data-theme="dark"] .chip:hover { background: var(--surface-2); }
+html[data-theme="dark"] .btn.primary { background: var(--brand-2); color: #fff; }
+html[data-theme="dark"] .btn.success { background: #047857; border-color: #047857; color: #fff; }
+html[data-theme="dark"] .btn.danger { color: #fff; }
+html[data-theme="dark"] .chip.on { background: var(--brand-2); color: #fff; }
+html[data-theme="dark"] table.t tbody tr:hover td, html[data-theme="dark"] .qItem:hover { background: #162033; }
+html[data-theme="dark"] table.t th { background: #0f172a; }
+html[data-theme="dark"] .modalFoot { background: var(--surface-2); }
+html[data-theme="dark"] #login { background: radial-gradient(1200px 600px at 85% -10%, #10233d, transparent 60%), radial-gradient(900px 500px at -10% 110%, #0d2a24, transparent 60%), var(--bg); }
+html[data-theme="dark"] .warnBox { background: var(--warn-soft); border-color: #5c4513; color: #fcd34d; }
+html[data-theme="dark"] .infoBox { background: var(--info-soft); border-color: #1e3a5f; color: #bfdbfe; }
+html[data-theme="dark"] .pill.good { border-color: #14532d; } html[data-theme="dark"] .pill.warn { border-color: #5c4513; }
+html[data-theme="dark"] .pill.bad { border-color: #5f1d1d; } html[data-theme="dark"] .pill.info { border-color: #1e3a5f; } html[data-theme="dark"] .pill.violet { border-color: #3b2f6b; }
+html[data-theme="dark"] .flag.H, html[data-theme="dark"] .flag.HH { background: #3b1414; color: #fca5a5; }
+html[data-theme="dark"] .flag.L, html[data-theme="dark"] .flag.LL { background: #102544; color: #93c5fd; }
+html[data-theme="dark"] .flag.A { background: #3a2a0c; color: #fcd34d; }
+html[data-theme="dark"] table.res td.val input.calc { background: #1e293b; }
+html[data-theme="dark"] table.res tr.abn td.val input, html[data-theme="dark"] table.res tr.abn td.val select { background: #2a1616; border-color: #7f1d1d; }
+html[data-theme="dark"] table.res tr.crit td { background: #2a1212; }
+html[data-theme="dark"] table.posT tr.short td, html[data-theme="dark"] input.invalid { background: #2a1616; }
+html[data-theme="dark"] .stickyFoot { background: rgba(11, 18, 32, .92); }
+html[data-theme="dark"] .docPreview { background: #1f2937; }
+html[data-theme="dark"] .ptAvatar.f { background: #3a1730; color: #f9a8d4; }
+html[data-theme="dark"] .kbd { background: #1e293b; border-color: #334155; }
+html[data-theme="dark"] .navItem:hover { background: #162033; }
+html[data-theme="dark"] .toast { background: #1e293b; border: 1px solid #334155; }
+html[data-theme="dark"] .toast.good { background: #065f46; } html[data-theme="dark"] .toast.bad { background: #7f1d1d; }
+html[data-theme="dark"] .dpGrid button:hover { background: var(--brand-soft); }
+html[data-theme="dark"] .alertIcon.bad { background: var(--bad-soft); } html[data-theme="dark"] .alertIcon.warn { background: var(--warn-soft); } html[data-theme="dark"] .alertIcon.info { background: var(--info-soft); }
+html[data-theme="dark"] .sum, html[data-theme="dark"] .totals > div:last-child { color: var(--text); }
+html[data-theme="dark"] .doc, html[data-theme="dark"] .doc * { color-scheme: light; }
+
+/* theme button */
+.themeBtn svg { display: block; }
+
+/* ---------------- age input ---------------- */
+.ageIn { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.ageIn label { display: flex; align-items: center; gap: 4px; }
+.ageIn input { width: 64px !important; text-align: center; }
+.ageIn span { font-size: 12px; color: var(--muted); }
+.ageIn .ageHint { color: var(--brand-2); font-size: 11.5px; width: 100%; min-height: 14px; }
+.ageIn.compact input { width: 52px !important; }
+
+/* ---------------- doctor picker ---------------- */
+.drPick { position: relative; }
+.drPickBtn { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); padding: 9px 12px; cursor: pointer; text-align: right; min-height: 42px; }
+.drPickBtn:hover { border-color: var(--brand-2); }
+.drPickBtn .caret { color: var(--muted); }
+.drPickPop { position: absolute; top: calc(100% + 4px); right: 0; left: 0; z-index: 30; background: #fff; border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 16px 40px rgba(15, 23, 42, .18); padding: 8px; min-width: 320px; }
+.drPickQ { margin-bottom: 6px; }
+.drPickList { max-height: 320px; overflow-y: auto; }
+.drPickGroup { font-size: 11px; font-weight: 700; color: var(--brand-2); padding: 8px 8px 4px; }
+.drPickItem { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.drPickItem:hover { background: var(--brand-soft); }
+.drPickItem.on { background: var(--brand-soft); outline: 1px solid var(--brand-2); }
+.drPickItem.off { opacity: .6; }
+.drPickItem b { display: block; font-size: 13.5px; }
+.drPickItem small { color: var(--muted); font-size: 11.5px; }
+.drPickMeta { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.drPickFoot { display: flex; justify-content: space-between; gap: 6px; border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; }
+
+/* ---------------- cashier ---------------- */
+.billCard { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: #fff; display: flex; gap: 12px; align-items: center; margin-bottom: 8px; cursor: pointer; }
+.billCard:hover { border-color: var(--brand-2); }
+.billCard .kindTag { min-width: 76px; text-align: center; font-size: 11px; font-weight: 700; border-radius: 8px; padding: 6px 4px; }
+.kind-visit { background: var(--info-soft); color: var(--info); } .kind-lab { background: #fdf0e3; color: #9a4d0b; } .kind-sale { background: #e3f4f5; color: #0e6b75; } .kind-admission { background: var(--violet-soft); color: var(--violet); } .kind-deposit { background: var(--good-soft); color: var(--good); }
+html[data-theme="dark"] .kind-lab { background: #2c1d0e; color: #fdba74; } html[data-theme="dark"] .kind-sale { background: #0c2a2d; color: #5eead4; }
+.billCard .amt { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 110px; text-align: left; }
+.cashGrid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1150px) { .cashGrid { grid-template-columns: 1fr; } }
+.testChips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 236px; overflow-y: auto; padding: 4px 2px; border: 1px solid var(--line); border-radius: 10px; align-content: flex-start; }
+.testChips .chip { direction: ltr; font-weight: 700; min-width: 54px; text-align: center; }
+
+/* ---------------- beds ---------------- */
+.bedGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.bedCard { border: 2px dashed var(--line-2); border-radius: 12px; padding: 10px 12px; background: #fff; cursor: pointer; min-height: 96px; }
+.bedCard.busy { border-style: solid; border-color: var(--violet); }
+.bedCard b { display: block; }
+.bedCard .bn { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+
+/* ---------------- lab result pages ---------------- */
+.deptTabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; position: sticky; top: -20px; z-index: 4; background: var(--bg); padding: 8px 0; }
+.deptTabs button { border: 1px solid var(--line-2); background: var(--surface); color: var(--text-2); border-radius: 20px; padding: 6px 14px; cursor: pointer; direction: ltr; }
+.deptTabs button.on { background: var(--brand-2); border-color: var(--brand-2); color: #fff; font-weight: 700; }
+.deptTabs button .cnt { font-size: 11px; opacity: .8; margin-inline-start: 4px; }
+.deptTabs button.done::after { content: ' ✓'; }
+.deptPage { display: none; } .deptPage.on { display: block; }
+table.res td.cm { width: 34px; } table.res .cmBtn { border: 0; background: transparent; cursor: pointer; color: var(--muted); padding: 2px; }
+table.res .cmBtn.has { color: var(--brand-2); }
+table.res tr.cmRow td { padding-top: 0; }
+table.res tr.cmRow input { font-size: 12px; padding: 4px 8px; direction: rtl; }
+.rangeGrid input { padding: 5px 6px !important; }
+.compList { max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 10px; direction: ltr; }
+.compList label { font-size: 12px; }
+
+/* ---------------- CDSS warnings ---------------- */
+.cdss { border: 1px solid #f3c58f; background: #fff7ed; color: #8a4b0c; border-radius: 10px; padding: 8px 12px; margin: 8px 0; font-size: 12.5px; }
+.cdss b { color: #b45309; }
+.cdss div + div { margin-top: 3px; }
+html[data-theme="dark"] .cdss { background: #2b1d0c; border-color: #6b3f0f; color: #fdba74; }
+.altHint { font-size: 10.5px; color: var(--info); cursor: pointer; text-decoration: underline; }
+
+/* ---------------- lab report v2 (settings driven) ---------------- */
+.labDoc2 { direction: rtl; }
+.labDoc2 .lbf { font-family: var(--lf, Vazirmatn), Vazirmatn, Tahoma, sans-serif; font-size: var(--lfs, 12px); font-weight: var(--lfw, normal); line-height: var(--llh, 1.5); }
+.labDoc2 .lbf b, .labDoc2 .lbf h3, .labDoc2 table.rt2 td.v { font-weight: 700; }
+.labDoc2 .pageTable { width: 100%; border-collapse: collapse; }
+.labDoc2 .pageTable > thead > tr > td, .labDoc2 .pageTable > tbody > tr > td, .labDoc2 .pageTable > tfoot > tr > td { padding: 0; }
+.labDoc2 .footSpace { height: 22mm; }
+.labDoc2 .ptBoxFa { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px 16px; border: 1px solid #888; border-radius: 6px; padding: 7px 10px; margin: 2mm 0 3mm; direction: rtl; }
+.labDoc2 .ptBoxFa span { color: #555; }
+.labDoc2 .ptBoxEn { direction: ltr; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px 16px; border: 1px solid #888; border-radius: 6px; padding: 7px 10px; margin: 2mm 0 3mm; }
+.labDoc2 .rSec { direction: ltr; margin-bottom: 3mm; break-inside: avoid; page-break-inside: avoid; }
+.labDoc2 .rSec h3 { margin: 0; padding: 4px 8px; color: #0b3a63; text-transform: uppercase; letter-spacing: .3px; font-size: calc(var(--lfs, 12px) + 1px); text-align: var(--lsa, left); }
+.labDoc2 table.rt2 { width: 100%; border-collapse: collapse; font-size: var(--lfs, 12px); }
+.labDoc2 table.rt2 th { text-align: left; padding: var(--lrp, 3px) 7px; font-size: calc(var(--lfs, 12px) - 1px); color: #333; }
+.labDoc2 table.rt2 td { padding: var(--lrp, 3px) 7px; vertical-align: top; }
+.labDoc2 table.rt2 td.v { font-weight: 700; white-space: nowrap; text-align: var(--lra, left); }
+.labDoc2 table.rt2 td.v.abn { color: #b42318; } .labDoc2 table.rt2 td.v.low { color: #175cd3; }
+.labDoc2 table.rt2 .f { font-size: .8em; font-weight: 800; margin-left: 4px; }
+.labDoc2 table.rt2 td.memo { white-space: pre-wrap; font-weight: normal; }
+.labDoc2 tr.cmt td { font-size: .92em; color: #444; font-style: italic; padding-top: 0; direction: rtl; text-align: right; }
+.labDoc2.grid-grid .rSec h3 { background: #eef3f8; border: 1px solid #b9c6d3; border-bottom: 0; }
+.labDoc2.grid-grid table.rt2 th { border: 1px solid #b9c6d3; background: #f8fafc; }
+.labDoc2.grid-grid table.rt2 td { border: 1px solid #d3dbe3; }
+.labDoc2.grid-lines .rSec h3 { border-bottom: 2px solid #0b3a63; }
+.labDoc2.grid-lines table.rt2 th { border-bottom: 1px solid #555; }
+.labDoc2.grid-lines table.rt2 td { border-bottom: 1px solid #ddd; }
+.labDoc2.grid-none .rSec h3 { border-bottom: 1px solid #999; }
+.labDoc2 .commentBox { border: 1px solid #ccc; padding: 6px 8px; white-space: pre-wrap; direction: rtl; }
+.labDoc2 .labFoot { position: absolute; bottom: 7mm; left: 12mm; right: 12mm; }
+.labDoc2 .signRow { display: flex; justify-content: space-between; margin-top: 10mm; direction: ltr; }
+.labDoc2 .signRow div { min-width: 55mm; text-align: center; border-top: 1px solid #555; padding-top: 3px; font-size: .9em; }
+@media print {
+  .labDoc2 { min-height: auto !important; padding-top: 8mm !important; }
+  .labDoc2 .labFoot { position: fixed; bottom: 6mm; left: 12mm; right: 12mm; }
+}
+
+/* ---------------- waiting-room display ---------------- */
+.qDisplayLink { margin-top: 8px; }
+
+/* receipts: balance to be paid at the reception cashier */
+.rcPayAt { border: 1.5px solid #000; border-radius: 4px; text-align: center; font-weight: 800; padding: 1mm; margin: 1mm 0; font-size: 12px; }
+
+/* lab results: comment for the doctor under each test */
+.cmtBtn.on { color: var(--brand-2); background: var(--brand-soft); }
+tr.cmtRow td { padding-top: 0 !important; }
+tr.cmtRow input { width: 100%; font-size: 12px; padding: 5px 8px; border: 1px dashed var(--line-2); border-radius: 6px; background: var(--surface-2); }
+
+/* sample tube labels */
+.doc.tubeLabel { min-height: 0; margin: 0; padding: 1.2mm 2mm; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; font-family: Vazirmatn, Tahoma, sans-serif; font-size: 8.5px; line-height: 1.15; color: #000; background: #fff; }
+.tubeLabel .tlTop { display: flex; justify-content: space-between; gap: 4px; white-space: nowrap; overflow: hidden; }
+.tubeLabel .tlTop b { font-size: 9.5px; overflow: hidden; text-overflow: ellipsis; }
+.tubeLabel .tlCode { text-align: center; } .tubeLabel .tlCode svg { max-width: 100%; height: auto; }
+.tubeLabel .tlBot { display: flex; justify-content: space-between; font-weight: 700; }
+.tubeLabel .tlTests { font-size: 7.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.docPreview.size-label { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+.docPreview.size-label .doc { outline: 1px dashed #999; }
+.rangeGrid td { padding: 4px 6px !important; vertical-align: middle; }
+.rangeGrid td.nowrap { white-space: nowrap; }
+.rangeGrid td.nowrap input, .rangeGrid td.nowrap select { display: inline-block; width: 68px !important; margin-inline-end: 4px; }
+.rangeGrid td select[data-k="sex"] { width: 82px !important; }

@@ -23,10 +23,11 @@ Pages['dr-queue'] = {
       <div class="toolbar">${isAdmin ? `<select id="q_dr" style="width:auto">${opt(App.doctors.map(d => [d.id, doctorName(d)]), myDoctorId())}</select>` : ''}
         <button class="btn primary lg" data-act="next">${icon('next')} مریض بعدی</button><button class="btn" data-act="walk">${icon('plus')} ویزیت بدون نوبت</button></div></div>
       <div class="grid g3" id="qK"></div>
-      <div class="queueCols" style="margin-top:16px"><div class="qCol"><h3>در انتظار <small id="cW"></small></h3><div id="qW"></div></div><div class="qCol"><h3>نزد داکتر <small id="cI"></small></h3><div id="qI"></div></div><div class="qCol"><h3>ویزیت شده امروز <small id="cD"></small></h3><div id="qD"></div></div></div>`;
+      <div class="queueCols" style="margin-top:16px"><div class="qCol"><h3>در انتظار <small id="cW"></small></h3><div id="qW"></div></div><div class="qCol"><h3>نزد داکتر <small id="cI"></small></h3><div id="qI"></div></div><div class="qCol"><h3>ویزیت شده امروز <small id="cD"></small></h3><div id="qD"></div></div></div>
+      <div class="card" id="qAdmBox" style="margin-top:16px"><div class="cardHead"><h2>${icon('bed')} مریضان بستری <small id="cA" class="muted"></small></h2><button class="btn sm" data-act="ipd">${icon('bed', 13)} بستر و تخت‌ها</button></div><div id="qA"></div></div>`;
     let rows = [];
     const dr = () => isAdmin ? Number($('#q_dr', view).value) : App.user.doctor_id;
-    const item = (v) => `<div class="qItem ${v.status}" data-id="${v.id}"><div class="qNo">${v.turn_no || '—'}</div><div class="grow"><b>${esc(v.full_name)}</b><small>ولد ${esc(v.father_name || '—')} · ${esc(ageLabel(v.birth_date))} · ${sexFa(v.sex)} · ${esc(v.service_name)}${v.note ? ' · ' + esc(v.note) : ''}</small></div><small class="muted ltr">${fmtTime(v.checked_in_at || v.created_at)}</small></div>`;
+    const item = (v) => `<div class="qItem ${v.status}" data-id="${v.id}"><div class="qNo">${v.turn_no || '—'}</div><div class="grow"><b>${esc(v.full_name)}</b><small>ولد ${esc(v.father_name || '—')} · ${esc(ageLabel(v.birth_date))} · ${sexFa(v.sex)} · ${esc(v.service_name)}${v.note ? ' · ' + esc(v.note) : ''}</small></div>${['waiting', 'in_visit'].includes(v.status) ? `<button class="btn sm ghost" data-call="${v.id}" title="صدا زدن در صفحه نمایش (TV)">${icon('megaphone', 14)}</button>` : ''}<small class="muted ltr">${fmtTime(v.checked_in_at || v.created_at)}</small></div>`;
     const load = async () => {
       const q = { 'eq.visit_date': today(), order: 'turn_no', limit: 500 }; if (dr()) q['eq.doctor_id'] = dr();
       rows = (await API.list('visits', q)).filter(v => !['cancelled', 'reserved', 'no_show'].includes(v.status));
@@ -36,11 +37,22 @@ Pages['dr-queue'] = {
       $('#qD', view).innerHTML = D.map(item).join('') || '<div class="empty">—</div>';
       $('#cW', view).textContent = W.length; $('#cI', view).textContent = I.length; $('#cD', view).textContent = D.length;
       $('#qK', view).innerHTML = kpi('در انتظار', W.length, { ic: 'clock', cls: 'warn' }) + kpi('ویزیت شده امروز', D.length, { ic: 'check', cls: 'good' }) + kpi('مجموع مریضان امروز', rows.length, { ic: 'users' });
+      const aq = { 'eq.status': 'admitted', limit: 100 }; if (dr()) aq['eq.doctor_id'] = dr();
+      const adm = await API.list('admissions', aq).catch(() => []);
+      $('#cA', view).textContent = adm.length; $('#qAdmBox', view).classList.toggle('hidden', !adm.length);
+      $('#qA', view).innerHTML = `<div class="bedGrid">${adm.map(a => `<div class="bedCard busy" data-adm="${a.id}"><div class="bn"><span>${esc(a.bed_name || '')}</span><span class="codeTag">${esc(a.adm_no)}</span></div><b>${esc(a.full_name)}</b><small class="muted">${esc(ageLabel(a.birth_date))} · ${sexFa(a.sex)} · از ${fmtDate(a.admitted_at)}</small><div class="mini">${esc(a.diagnosis || '')}</div>
+        <div class="bar" style="margin-top:6px"><button class="btn sm" data-admvisit="${a.patient_id}">${icon('rx', 13)} ویزیت / نسخه</button></div></div>`).join('')}</div>`;
     };
-    view.addEventListener('click', (e) => { const q = e.target.closest('.qItem'); if (q) go('encounter', { visit_id: Number(q.dataset.id) }); });
+    view.addEventListener('click', (e) => {
+      const c = e.target.closest('[data-call]'); if (c) { e.stopPropagation(); API.post('/api/visits/call/' + c.dataset.call).then(x => toast(`نوبت ${x.turn} صدا زده شد`, 'good')).then(load).catch(errToast); return; }
+      const av = e.target.closest('[data-admvisit]'); if (av) { go('encounter', { patient_id: Number(av.dataset.admvisit) }); return; }
+      const ad = e.target.closest('[data-adm]'); if (ad) { admissionDlg(Number(ad.dataset.adm), load).catch(errToast); return; }
+      const q = e.target.closest('.qItem'); if (q) go('encounter', { visit_id: Number(q.dataset.id) });
+    });
     if (isAdmin) $('#q_dr', view).onchange = () => { localSet('admin_doctor', $('#q_dr', view).value); load(); };
     actions(view, {
-      next: async () => { const w = rows.find(v => v.status === 'waiting'); if (!w) return toast('مریضی در انتظار نیست'); await API.post('/api/visits/status/' + w.id, { status: 'in_visit' }); go('encounter', { visit_id: w.id }); },
+      ipd: () => go('ipd'),
+      next: async () => { const w = rows.find(v => v.status === 'waiting'); if (!w) return toast('مریضی در انتظار نیست'); await API.post('/api/visits/call/' + w.id).catch(() => API.post('/api/visits/status/' + w.id, { status: 'in_visit' })); go('encounter', { visit_id: w.id }); },
       walk: async () => {
         const m = modal({ title: 'ویزیت بدون نوبت — انتخاب مریض', body: `<div class="searchBox"><input id="wk_q" placeholder="کد مریض، نام یا تلفن…"></div><div class="muted small" style="margin-top:8px">مریض باید قبلاً در سیستم ثبت شده باشد (پذیرش). برای مریض جدید از دکمه زیر استفاده کنید.</div>`,
           foot: `<button class="btn" id="wk_new">${icon('plus')} ثبت مریض جدید</button>` });
@@ -50,7 +62,7 @@ Pages['dr-queue'] = {
     });
     await load(); this._load = load;
   },
-  onEvent(m) { if (m.type.startsWith('visit') && this._load) this._load(); }
+  onEvent(m) { if ((m.type.startsWith('visit') || m.type.startsWith('ipd')) && this._load) this._load(); }
 };
 
 // ================================================================ encounter (visit + prescription + lab)
@@ -100,7 +112,7 @@ Pages.encounter = {
 
     view.innerHTML = `
       <div class="pageHead"><div class="ptHead">${patientHeadHTML(patient)}</div>
-        <div class="toolbar">${visit ? `<span class="pill info">نوبت ${visit.turn_no || '—'} · ${esc(visit.service_name)}</span>` : ''}${enc ? `<span class="pill">ویزیت #${enc.id}</span>` : '<span class="pill warn">ویزیت جدید</span>'}
+        <div class="toolbar">${visit ? `<span class="pill info">نوبت ${visit.turn_no || '—'} · ${esc(visit.service_name)}</span>${['waiting', 'in_visit'].includes(visit.status) ? `<button class="btn sm" data-act="call" title="اعلام نوبت در صفحه نمایش">${icon('megaphone', 14)} صدا زدن</button>` : ''}` : ''}${enc ? `<span class="pill">ویزیت #${enc.id}</span>` : '<span class="pill warn">ویزیت جدید</span>'}
           <button class="btn" data-act="file">${icon('file')} پرونده کامل</button><button class="btn" data-act="editPt">${icon('edit')} مشخصات</button></div></div>
       ${visit?.note ? `<div class="infoBox">یادداشت پذیرش: ${esc(visit.note)}</div>` : ''}
       ${patient.allergies ? `<div class="warnBox">${icon('alert', 15)} حساسیت: <b>${esc(patient.allergies)}</b></div>` : ''}
@@ -110,14 +122,15 @@ Pages.encounter = {
           <div class="card"><h2>${icon('heart')} علایم حیاتی</h2>
             <div class="vitals" id="vit">
               ${[['bp_sys', 'فشار (سیستول)', 'mmHg'], ['bp_dia', 'فشار (دیاستول)', 'mmHg'], ['pulse', 'نبض PR', '/min'], ['resp_rate', 'تنفس RR', '/min'], ['temp', 'حرارت T', '°C'], ['weight', 'وزن', 'kg'], ['height', 'قد', 'cm'], ['spo2', 'SpO₂', '%'], ['blood_sugar', 'قند خون', 'mg/dL'], ['head_circ', 'دور سر', 'cm']]
-                .map(([k, l, u]) => `<label class="field"><span>${l} <small class="muted">${u}</small></span><input name="${k}" type="number" step="any" value="${esc(v(k) || (k === 'weight' && visit?.weight ? visit.weight : ''))}"></label>`).join('')}
-            </div></div>
+                .map(([k, l, u]) => `<label class="field"><span>${l} <small class="muted">${u}</small></span><input name="${k}" type="number" step="any" value="${esc(v(k) || (k === 'weight' && visit?.weight ? visit.weight : '') || (k === 'height' && visit?.height ? visit.height : ''))}"></label>`).join('')}
+            </div><div class="mini" id="bmiBox" style="margin-top:6px"></div></div>
           <div class="card"><h2>${icon('steth')} شکایت، معاینه و تشخیص</h2>
             <div class="formGrid" id="clin">
               <label class="field span2"><span>شکایت اصلی</span><textarea name="complaint" rows="2">${esc(v('complaint'))}</textarea></label>
               <label class="field span2"><span>تاریخچه مریضی فعلی</span><textarea name="history" rows="2">${esc(v('history'))}</textarea></label>
               <label class="field span2"><span>معاینه فزیکی</span><textarea name="exam" rows="2">${esc(v('exam'))}</textarea></label>
-              <label class="field span2"><span>تشخیص (Diagnosis)</span><input name="diagnosis" class="en" value="${esc(v('diagnosis'))}" list="dxList"></label>
+              <label class="field"><span>تشخیص (Diagnosis)</span><input name="diagnosis" class="en" value="${esc(v('diagnosis'))}" list="dxList"></label>
+              <label class="field"><span>کد ICD-10 <small class="muted">(کد یا نام را بنویسید)</small></span><input name="diagnosis_code" class="ltr" value="${esc(v('diagnosis_code'))}" list="icdList" placeholder="J06.9"></label>
               <label class="field span2"><span>Impression</span><input name="impression" class="en" value="${esc(v('impression'))}"></label>
               <label class="field span2"><span>یادداشت داکتر <small class="muted">(فقط در صورت انتخاب چاپ می‌شود)</small></span><textarea name="notes" rows="2">${esc(v('notes'))}</textarea></label>
               <label class="field full"><span>یادداشت خصوصی <small class="muted">(هرگز چاپ نمی‌شود)</small></span><input name="private_notes" value="${esc(v('private_notes'))}"></label>
@@ -154,6 +167,7 @@ Pages.encounter = {
             <div class="bar"><select id="tplSel" style="width:auto"><option value="">قالب نسخه…</option></select><button class="btn sm" data-act="saveTpl">${icon('star', 14)} ذخیره به عنوان قالب</button>
             <label class="field" style="flex-direction:row;align-items:center;gap:6px"><span>تخفیف دواخانه٪</span><input type="number" id="rxDisc" min="0" max="100" style="width:70px" value="${enc?.rx?.discount_pct || 0}"></label></div></div>
             ${rxLocked ? `<div class="warnBox">این نسخه توسط دواخانه ${enc.rx.status === 'dispensed' ? 'تحویل' : 'قسماً تحویل'} شده و قابل تغییر نیست.</div>` : ''}
+            <div id="cdssRx"></div>
             <div class="rxItems"><div class="rxItem head"><span>#</span><span>دوا (Medicine)</span><span>شکل</span><span>قوت</span><span>واحد</span><span>مقدار</span><span>دفعات مصرف</span><span>زمان</span><span>مدت</span><span>واحد مدت</span><span>تعداد</span><span></span></div>
               <div id="rxRows"></div>
               ${rxLocked ? '' : `<div class="rxAdd"><div class="searchBox"><input id="medQ" placeholder="نام یا کد دوا را بنویسید و Enter بزنید… (دوای خارج از لیست هم قابل نوشتن است)" autocomplete="off"></div></div>`}</div>
@@ -165,7 +179,7 @@ Pages.encounter = {
             ${labLocked ? `<div class="warnBox">این درخواست در لابراتوار پذیرش شده و قابل تغییر نیست.</div>` : `
             <div class="searchBox" style="margin-bottom:10px"><input id="testQ" placeholder="جستجوی آزمایش: نام، کد یا نمبر (مثلاً 401 یا CBC)…" autocomplete="off"></div>
             <div class="testPick">${QUICK_TESTS.map(c => cat.tests.find(t => t.code === c && t.active && t.orderable)).filter(Boolean).map(t => `<button type="button" class="chip" data-tid="${t.id}">${esc(t.code)}</button>`).join('')}</div>`}
-            <div class="selTests" id="selTests"></div>
+            <div class="selTests" id="selTests"></div><div id="cdssLab"></div>
             <label class="field" style="margin-top:10px"><span>یادداشت برای لابراتوار</span><input id="labNote" value="${esc(enc?.lab?.note || '')}"></label>
           </div>
       </div>
@@ -175,7 +189,8 @@ Pages.encounter = {
         ${visit ? `<button class="btn success lg" data-act="save" data-mode="finish">${icon('next')} ختم ویزیت و مریض بعدی</button>` : ''}
         <button class="btn lg" data-act="preview">${icon('eye')} پیش‌نمایش نسخه</button>
       </div>
-      ${datalist('dxList', ['Upper respiratory tract infection (URTI)', 'Acute gastroenteritis', 'Pneumonia', 'Bronchiolitis', 'Otitis media', 'Tonsillitis / Pharyngitis', 'Urinary tract infection (UTI)', 'Iron deficiency anemia', 'Malnutrition', 'Typhoid fever', 'Brucellosis', 'Hypertension', 'Diabetes mellitus type 2', 'Gastritis / PUD', 'Pregnancy — routine ANC', 'Threatened abortion', 'Pre-eclampsia', 'Vaginitis', 'PCOS', 'Dysmenorrhea', 'Asthma', 'Allergic rhinitis', 'Tension headache', 'Migraine'])}
+      ${datalist('dxList', ['Upper respiratory tract infection (URTI)', 'Acute gastroenteritis', 'Pneumonia', 'Bronchiolitis', 'Otitis media', 'Tonsillitis / Pharyngitis', 'Urinary tract infection (UTI)', 'Iron deficiency anemia', 'Malnutrition', 'Typhoid fever', 'Brucellosis', 'Hypertension', 'Diabetes mellitus type 2', 'Gastritis / PUD', 'Pregnancy — routine ANC', 'Threatened abortion', 'Pre-eclampsia', 'Vaginitis', 'PCOS', 'Dysmenorrhea', 'Asthma', 'Allergic rhinitis', 'Tension headache', 'Migraine', ...ICD10.map(x => x[1])].filter((x, i, a) => a.indexOf(x) === i))}
+      <datalist id="icdList">${ICD10.map(([c, n]) => `<option value="${esc(c)}">${esc(n)}</option>`).join('')}</datalist>
       ${datalist('formList', forms)}${datalist('unitList', units)}${datalist('freqList', freqs)}${datalist('timeList', timings)}${datalist('durList', durs)}${datalist('routeList', routes)}`;
 
     // ---------- prescription rows ----------
@@ -183,7 +198,7 @@ Pages.encounter = {
     const drawRx = () => {
       rowsEl.innerHTML = rxItems.map((it, i) => `<div class="rxItem" data-i="${i}">
         <span class="idx">${i + 1}</span>
-        <div><input class="medName" data-f="name" value="${esc(it.name)}" ${rxLocked ? 'readonly' : ''}><div class="stockHint">${it.medicine_id ? (it._stock === undefined ? '' : it._stock > 0 ? `<span class="pos">موجود: ${fmtNum(it._stock)}</span>` : '<span class="neg">در دواخانه موجود نیست</span>') : '<span class="muted">خارج از لیست دواخانه</span>'}</div></div>
+        <div><input class="medName" data-f="name" value="${esc(it.name)}" ${rxLocked ? 'readonly' : ''}><div class="stockHint">${it.medicine_id ? (it._stock === undefined ? '' : it._stock > 0 ? `<span class="pos">موجود: ${fmtNum(it._stock)}</span>` : `<span class="neg">در دواخانه موجود نیست</span>${(it._alts || []).length && !rxLocked ? ` · جایگزین: ${it._alts.map((a, k) => `<a href="#" class="altHint" data-alt="${i}:${k}">${esc(a.name)} ${esc(a.strength || '')} (${fmtNum(a.stock)})</a>`).join('، ')}` : ''}`) : '<span class="muted">خارج از لیست دواخانه</span>'}</div></div>
         <input data-f="form" list="formList" value="${esc(it.form || '')}" class="en">
         <input data-f="strength" value="${esc(it.strength || '')}" class="en">
         <input data-f="unit" list="unitList" value="${esc(it.unit || '')}" class="en">
@@ -197,6 +212,17 @@ Pages.encounter = {
         <input class="rxNoteIn" data-f="note" placeholder="یادداشت این دوا (مثلاً: قبل از خواب، با آب زیاد…)" value="${esc(it.note || '')}">
       </div>`).join('') || '<div class="empty" style="padding:16px">دوایی اضافه نشده</div>';
       if (rxLocked) $$('input', rowsEl).forEach(i => i.readOnly = true);
+      runCdss();
+    };
+    // ---------- clinical decision support: allergy / interaction / duplicate warnings ----------
+    let cdssReady = false;
+    const runCdss = () => {
+      if (!cdssReady) return;
+      const allergies = $('#ptMed [name="allergies"]', view)?.value ?? patient.allergies;
+      const rxW = cdssCheck({ items: rxItems.filter(x => x.name).map(x => ({ name: x.name, generic: x._generic || x.generic })), patient: { allergies } });
+      const labW = cdssCheck({ testIds: selTests.filter(id => !labIds.includes(id)), recentLabs: file.labs.filter(l => l.id !== enc?.lab?.id && l.status !== 'cancelled'), catalog: cat });
+      const box = (w) => w.length ? `<div class="cdss">${w.map(x => `<div>${esc(x)}</div>`).join('')}</div>` : '';
+      const a = $('#cdssRx', view), b = $('#cdssLab', view); if (a) a.innerHTML = box(rxW); if (b) b.innerHTML = box(labW);
     };
     rowsEl.addEventListener('input', (e) => {
       const r = e.target.closest('.rxItem'); if (!r) return; const it = rxItems[Number(r.dataset.i)]; const f = e.target.dataset.f; if (!f) return;
@@ -205,14 +231,19 @@ Pages.encounter = {
       if (f === 'name') it.medicine_id = null;
       if (['dose', 'frequency', 'duration', 'duration_unit', 'form'].includes(f) && !it._qtyTouched) { const q = autoQty(it); if (q !== '' && q !== it.qty) { it.qty = q; $('[data-f="qty"]', r).value = q; } }
     });
-    rowsEl.addEventListener('click', (e) => { const d = e.target.closest('[data-del]'); if (d) { rxItems.splice(Number(d.dataset.del), 1); drawRx(); } });
+    rowsEl.addEventListener('click', (e) => {
+      const d = e.target.closest('[data-del]'); if (d) { rxItems.splice(Number(d.dataset.del), 1); drawRx(); return; }
+      const al = e.target.closest('[data-alt]'); if (al) { e.preventDefault(); const [i, k] = al.dataset.alt.split(':').map(Number); const it = rxItems[i], m = it._alts[k]; Object.assign(it, { medicine_id: m.id, name: m.name, form: m.form || it.form, _stock: m.stock, _generic: m.generic, _alts: [] }); drawRx(); toast('جایگزین شد: ' + m.name, 'good'); }
+    });
+    rowsEl.addEventListener('change', (e) => { if (e.target.dataset.f === 'name') runCdss(); });
     const addMed = (m) => {
       const last = rxItems[rxItems.length - 1];
-      const it = m ? { medicine_id: m.id, name: m.name, form: m.form || '', strength: (m.strength || '').replace(/\s*(mg|ml|g|mcg|IU|%)$/i, ''), unit: ((m.strength || '').match(/(mg|ml|g|mcg|IU|%)$/i) || [])[1] || '', dose: '1', frequency: '', timing: 'بعد از غذا', duration: last?.duration || 5, duration_unit: last?.duration_unit || 'روز', qty: '', note: '', _stock: m.stock }
+      const it = m ? { medicine_id: m.id, name: m.name, form: m.form || '', strength: (m.strength || '').replace(/\s*(mg|ml|g|mcg|IU|%)$/i, ''), unit: ((m.strength || '').match(/(mg|ml|g|mcg|IU|%)$/i) || [])[1] || '', dose: '1', frequency: '', timing: 'بعد از غذا', duration: last?.duration || 5, duration_unit: last?.duration_unit || 'روز', qty: '', note: '', _stock: m.stock, _generic: m.generic }
         : { medicine_id: null, name: $('#medQ', view).value.trim(), form: '', strength: '', unit: '', dose: '1', frequency: '', timing: '', duration: 5, duration_unit: 'روز', qty: '', note: '' };
       if (/Syrup|Suspension|Drops/i.test(it.form)) { it.unit = it.unit || 'ml'; it.dose = '5 ml'; it.qty = 1; }
       if (!it.name) return;
       rxItems.push(it); drawRx(); $('#medQ', view).value = '';
+      if (m && m.stock <= 0) API.get('/api/medicine-alternatives/' + m.id).then(a => { it._alts = a; drawRx(); }).catch(() => { });
       setTimeout(() => $(`.rxItem[data-i="${rxItems.length - 1}"] [data-f="frequency"]`, view)?.focus(), 30);
     };
     if (!rxLocked) {
@@ -224,7 +255,7 @@ Pages.encounter = {
       $('#medQ', view).addEventListener('keydown', (e) => { if (e.key === 'Enter' && $('#medQ', view).value.trim()) { setTimeout(() => { if ($('#medQ', view).value.trim()) { ac.close(); addMed(null); } }, 200); } });
     }
     // stock info for existing items
-    (async () => { for (const it of rxItems) if (it.medicine_id) { try { const m = await API.get('/api/medicine/' + it.medicine_id); it._stock = m.stock; } catch (_) { } } drawRx(); })();
+    (async () => { for (const it of rxItems) if (it.medicine_id) { try { const m = await API.get('/api/medicine/' + it.medicine_id); it._stock = m.stock; it._generic = m.generic; if (m.stock <= 0 && !rxLocked) it._alts = await API.get('/api/medicine-alternatives/' + m.id).catch(() => []); } catch (_) { } } drawRx(); })();
     drawRx();
 
     // ---------- templates ----------
@@ -245,6 +276,7 @@ Pages.encounter = {
       $$('.testPick .chip', view).forEach(c => c.classList.toggle('on', selTests.includes(Number(c.dataset.tid))));
       const tot = selTests.reduce((a, id) => a + (cat.byId.get(id)?.price || 0), 0);
       if (selTests.length) $('#selTests', view).insertAdjacentHTML('beforeend', `<small class="muted" style="align-self:center">جمع: ${money(tot)} ${currency()}</small>`);
+      runCdss();
     };
     const toggleTest = (id) => { if (labLocked) return; const i = selTests.indexOf(id); i >= 0 ? selTests.splice(i, 1) : selTests.push(id); drawTests(); };
     if (!labLocked) {
@@ -263,7 +295,7 @@ Pages.encounter = {
       const h = $('#hist', view);
       if (tab === 'lab') {
         h.innerHTML = file.labs.map(r => `<div class="histItem"><div class="hh"><b>${fmtDate(r.date)} · <span class="ltr">${esc(r.lab_code)}</span></b>${statusPill(LAB_STATUS, r.status)}</div>
-          ${r.results.length ? `<table class="labMini">${r.results.map(x => `<tr><td>${esc(x.name)}</td><td class="v ${esc(x.flag || '')}">${esc(x.value)} ${x.flag ? `<small>${esc(x.flag)}</small>` : ''}</td><td class="muted">${esc(x.unit || '')}</td><td class="muted">${esc(x.ref || '')}</td></tr>`).join('')}</table>` : `<div class="mini en">${esc(r.tests || '')}</div>`}</div>`).join('') || '<div class="empty">آزمایشی ثبت نشده</div>';
+          ${r.results.length ? `<table class="labMini">${r.results.map(x => `<tr><td>${esc(x.name)}</td><td class="v ${esc(x.flag || '')}">${esc(x.value)} ${x.flag ? `<small>${esc(x.flag)}</small>` : ''}</td><td class="muted">${esc(x.unit || '')}</td><td class="muted">${esc(x.ref || '')}</td></tr>${x.note ? `<tr><td colspan="4" class="mini" style="direction:rtl;text-align:right">↲ ${esc(x.note)}</td></tr>` : ''}`).join('')}</table>${r.report_note ? `<div class="mini">نظر لابراتوار: ${esc(r.report_note)}</div>` : ''}` : `<div class="mini en">${esc(r.tests || '')}</div>`}</div>`).join('') || '<div class="empty">آزمایشی ثبت نشده</div>';
         return;
       }
       h.innerHTML = file.encounters.filter(x => x.id !== enc?.id).map(e => { const rx = file.prescriptions.find(r => r.encounter_id === e.id); return `<div class="histItem"><div class="hh"><b>${fmtDate(e.date)}</b><small class="muted">${esc(doctorName({ title: e.doctor_title, name: e.doctor_name }))}</small></div>
@@ -280,6 +312,16 @@ Pages.encounter = {
       drawRx(); toast('نسخه قبلی اضافه شد', 'good');
     };
     drawHist('enc');
+
+    // ---------- BMI, ICD-10, decision support ----------
+    const bmiUpd = () => { const w = $('#vit [name="weight"]', view).value, h = $('#vit [name="height"]', view).value; const b = bmi(w, h); const ap = ageParts(patient.birth_date);
+      $('#bmiBox', view).innerHTML = b ? `BMI: <b>${b}</b> ${ap && ap.y >= 18 ? `<span class="pill ${b < 18.5 ? 'warn' : b < 25 ? 'good' : b < 30 ? 'warn' : 'bad'}">${b < 18.5 ? 'کم‌وزن' : b < 25 ? 'نارمل' : b < 30 ? 'اضافه وزن' : 'چاقی'}</span>` : '<small class="muted">(اطفال: با چارت رشد مقایسه شود)</small>'}` : ''; };
+    $('#vit', view).addEventListener('input', bmiUpd); bmiUpd();
+    const dxIn = $('[name="diagnosis"]', view), icdIn = $('[name="diagnosis_code"]', view);
+    icdIn.addEventListener('change', () => { const q = icdIn.value.trim().toLowerCase(); if (!q) return; const hit = ICD10.find(([c]) => c.toLowerCase() === q) || ICD10.find(([, n]) => n.toLowerCase() === q) || (q.length > 3 ? ICD10.find(([, n]) => n.toLowerCase().includes(q)) : null); if (hit) { icdIn.value = hit[0]; if (!dxIn.value.trim()) dxIn.value = hit[1]; } });
+    dxIn.addEventListener('change', () => { if (icdIn.value.trim()) return; const hit = ICD10.find(([, n]) => n.toLowerCase() === dxIn.value.trim().toLowerCase()); if (hit) icdIn.value = hit[0]; });
+    $('#ptMed [name="allergies"]', view).addEventListener('input', debounce(runCdss, 300));
+    cdssReady = true; runCdss();
 
     // ---------- print options / next visit ----------
     $$('[data-nv]', view).forEach(b => b.onclick = () => setDateInput($('#nextVisit', view), isoDate(addDays(new Date(), Number(b.dataset.nv)))));
@@ -327,6 +369,7 @@ Pages.encounter = {
       save: (b) => save(b, b.dataset.mode),
       preview: async () => { if (!encId) await save(null, 'none'); previewDoc(await buildDoc(), { size: App.settings.rx_page === 'A4' ? 'A4' : 'A5', title: 'نسخه' }); },
       file: () => openPatientFile(patient.id),
+      call: async () => { const x = await API.post('/api/visits/call/' + visit.id); toast(`نوبت ${x.turn} در صفحه نمایش اعلام شد`, 'good'); },
       editPt: () => editPatient(patient, () => go('encounter', params)),
       saveTpl: async () => {
         if (!rxItems.length) return toast('ابتدا دوا اضافه کنید', 'bad');
@@ -355,12 +398,12 @@ async function openPatientFile(id) {
     if (t === 'sum') body.innerHTML = `<div class="grid g2">${[['حساسیت‌ها', p.allergies], ['امراض مزمن / سابقه مریضی', p.chronic_diseases], ['سابقه قبلی', p.past_history], ['سابقه فامیلی', p.family_history], ['دواهای فعلی', p.current_medications], ['یادداشت', p.notes]]
       .map(([l, v]) => `<div class="card" style="margin:0"><b>${l}</b><div style="margin-top:6px;white-space:pre-wrap">${esc(v || '—')}</div></div>`).join('')}</div>`;
     if (t === 'enc') body.innerHTML = f.encounters.map(e => { const rx = f.prescriptions.find(r => r.encounter_id === e.id); const lab = f.labs.find(l => l.encounter_id === e.id); return `<div class="histItem"><div class="hh"><b>${weekday(e.date)} ${fmtDate(e.date)} — ${esc(doctorName({ title: e.doctor_title, name: e.doctor_name }))}</b><span>${App.user.role !== 'doctor' || !e.doctor_id || e.doctor_id === App.user.doctor_id ? `<button class="btn sm" data-open="${e.id}">${icon('edit', 13)} باز کردن</button> ` : ''}${rx ? `<button class="btn sm" data-print="${e.id}">${icon('print', 13)} چاپ نسخه</button>` : ''}</span></div>
-      <div class="grid g3" style="gap:8px">${e.complaint ? `<div><b>شکایت:</b> ${esc(e.complaint)}</div>` : ''}${e.diagnosis ? `<div><b>Dx:</b> <span class="en">${esc(e.diagnosis)}</span></div>` : ''}${e.exam ? `<div><b>معاینه:</b> ${esc(e.exam)}</div>` : ''}
+      <div class="grid g3" style="gap:8px">${e.complaint ? `<div><b>شکایت:</b> ${esc(e.complaint)}</div>` : ''}${e.diagnosis ? `<div><b>Dx:</b> <span class="en">${esc(e.diagnosis)}${e.diagnosis_code ? ' (' + esc(e.diagnosis_code) + ')' : ''}</span></div>` : ''}${e.exam ? `<div><b>معاینه:</b> ${esc(e.exam)}</div>` : ''}
       ${e.bp_sys ? `<div>BP: <span class="ltr">${e.bp_sys}/${e.bp_dia || ''}</span></div>` : ''}${e.weight ? `<div>وزن: ${e.weight} kg</div>` : ''}${e.temp ? `<div>T: ${e.temp} °C</div>` : ''}${e.notes ? `<div><b>یادداشت:</b> ${esc(e.notes)}</div>` : ''}${e.private_notes ? `<div class="muted"><b>خصوصی:</b> ${esc(e.private_notes)}</div>` : ''}</div>
       ${rx ? `<div style="margin-top:6px"><span class="rxCode">${esc(rx.rx_code)}</span> ${statusPill(RX_STATUS, rx.status)}<ul>${rx.items.map(i => `<li>${esc(i.name)} ${esc(i.strength || '')}${esc(i.unit || '')} · ${esc(i.dose || '')} · ${esc(i.frequency || '')} · ${esc(i.timing || '')} · ${i.duration ? esc(i.duration + ' ' + (i.duration_unit || '')) : ''} — #${fmtNum(i.qty)}</li>`).join('')}</ul></div>` : ''}
       ${lab ? `<div class="mini" style="margin-top:4px">آزمایش: <span class="ltr">${esc(lab.lab_code)}</span> ${statusPill(LAB_STATUS, lab.status)} <span class="en">${esc(lab.tests || '')}</span></div>` : ''}</div>`; }).join('') || '<div class="empty">ویزیتی ثبت نشده</div>';
     if (t === 'lab') body.innerHTML = f.labs.map(r => `<div class="histItem"><div class="hh"><b>${fmtDate(r.date)} · <span class="ltr">${esc(r.lab_code)}</span> · ${esc(r.doctor_name || '')}</b><span>${statusPill(LAB_STATUS, r.status)} ${['approved', 'delivered'].includes(r.status) ? `<button class="btn sm" data-labrep="${r.id}">${icon('print', 13)} راپور</button>` : ''}</span></div>
-      ${r.results.length ? `<table class="labMini">${r.results.map(x => `<tr><td>${esc(x.name)}</td><td class="v ${esc(x.flag || '')}">${esc(x.value)} ${x.flag ? `<small>${esc(x.flag)}</small>` : ''}</td><td class="muted">${esc(x.unit || '')}</td><td class="muted">${esc(x.ref || '')}</td></tr>`).join('')}</table>` : `<div class="mini en">${esc(r.tests || '')} — منتظر نتیجه</div>`}</div>`).join('') || '<div class="empty">آزمایشی ثبت نشده</div>';
+      ${r.results.length ? `<table class="labMini">${r.results.map(x => `<tr><td>${esc(x.name)}</td><td class="v ${esc(x.flag || '')}">${esc(x.value)} ${x.flag ? `<small>${esc(x.flag)}</small>` : ''}</td><td class="muted">${esc(x.unit || '')}</td><td class="muted">${esc(x.ref || '')}</td></tr>${x.note ? `<tr><td colspan="4" class="mini" style="direction:rtl;text-align:right">↲ ${esc(x.note)}</td></tr>` : ''}`).join('')}</table>${r.report_note ? `<div class="mini">نظر لابراتوار: ${esc(r.report_note)}</div>` : ''}` : `<div class="mini en">${esc(r.tests || '')} — منتظر نتیجه</div>`}</div>`).join('') || '<div class="empty">آزمایشی ثبت نشده</div>';
     if (t === 'vis') body.innerHTML = `<div class="tableWrap"><table class="t"><thead><tr><th>تاریخ</th><th>رسید</th><th>خدمت</th><th>داکتر</th><th>نوبت</th><th>وضعیت</th><th>فیس</th></tr></thead><tbody>${f.visits.map(v => `<tr><td>${fmtDate(v.visit_date)}</td><td class="codeTag">${esc(v.visit_no)}</td><td>${esc(v.service_name)}</td><td>${esc(v.doctor_name || '—')}</td><td class="c">${v.turn_no || ''}</td><td>${statusPill(VISIT_STATUS, v.status)}</td><td>${money(v.net)}</td></tr>`).join('') || emptyRow(7)}</tbody></table></div>`;
     if (t === 'vit') {
       const es = f.encounters.slice().reverse().filter(e => e.weight || e.bp_sys || e.temp);
@@ -425,7 +468,8 @@ Pages['dr-stats'] = {
     view.innerHTML = `<div class="pageHead"><div><h1>آمار ویزیت‌ها</h1><p>تعداد مریضان، فیس، نسخه‌ها و آزمایش‌های درخواستی.</p></div></div>
       <div class="filterBar"><label class="field"><span>از</span>${dateInput('from', months[0].range[0], 'id="s_from"')}</label><label class="field"><span>تا</span>${dateInput('to', today(), 'id="s_to"')}</label></div>
       <div class="card"><div class="tableWrap"><table class="t"><thead><tr><th>داکتر</th><th>ویزیت</th><th>فیس</th><th>نسخه</th><th>آزمایش</th><th>فروش نسخه‌ها در دواخانه</th></tr></thead><tbody id="sB"></tbody></table></div></div>
-      <div class="card"><h2>مریضان در هر ماه</h2><div class="chartBox"><canvas id="sC"></canvas></div></div>`;
+      <div class="grid g2"><div class="card"><h2>مریضان در هر ماه</h2><div class="chartBox"><canvas id="sC"></canvas></div></div>
+      <div class="card"><h2>تشخیص‌های پرتکرار (ICD-10)</h2><div id="sDx"></div></div></div>`;
     const load = async () => {
       const from = dateOf($('#s_from', view)), to = dateOf($('#s_to', view));
       const rows = await API.get('/api/reports/doctors', { from, to });
@@ -435,6 +479,11 @@ Pages['dr-stats'] = {
       const vs = (await API.list('visits', q)).filter(v => v.status !== 'reserved');
       destroyCharts();
       barChart($('#sC', view), months.map(m => m.label), [{ label: 'مریضان', data: months.map(m => vs.filter(v => v.visit_date >= m.range[0] && v.visit_date <= m.range[1]).length) }]);
+      const eq = { from, to, limit: 50000 }; if (App.user.role === 'doctor') eq['eq.doctor_id'] = App.user.doctor_id;
+      const encs = await API.list('encounters', eq).catch(() => []);
+      const g = new Map(); encs.filter(e => e.diagnosis || e.diagnosis_code).forEach(e => { const k = e.diagnosis_code || String(e.diagnosis).trim().toLowerCase(); const o = g.get(k) || { code: e.diagnosis_code || '', name: e.diagnosis || (ICD10.find(x => x[0] === e.diagnosis_code) || [])[1] || '', n: 0 }; o.n++; g.set(k, o); });
+      const top = [...g.values()].sort((a, b) => b.n - a.n).slice(0, 15);
+      $('#sDx', view).innerHTML = `<table class="t"><thead><tr><th>کد</th><th>تشخیص</th><th>تعداد</th></tr></thead><tbody>${top.map(x => `<tr><td class="codeTag">${esc(x.code)}</td><td class="en">${esc(x.name)}</td><td><b>${x.n}</b></td></tr>`).join('') || emptyRow(3, 'تشخیصی ثبت نشده')}</tbody></table>`;
     };
     $$('#s_from, #s_to', view).forEach(el => el.addEventListener('change', load));
     await load();

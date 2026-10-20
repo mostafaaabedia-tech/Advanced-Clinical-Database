@@ -7,8 +7,8 @@ function monthsAgg(days, months) {
   return months.map(m => {
     const rows = days.filter(d => d.date >= m.range[0] && d.date <= m.range[1]);
     const o = { ...m };
-    ['reception', 'ph_net', 'ph_sales', 'ph_returns', 'ph_cost', 'ph_profit', 'legacy_ph', 'lab_total', 'expenses', 'withdrawals', 'wd_personal', 'purchases', 'supplier_paid', 'ph_count', 'visits', 'lab_count'].forEach(k => o[k] = r2(sumBy(rows, k)));
-    o.net_profit = r2(o.ph_profit + o.lab_total + o.reception - o.expenses);
+    ['reception', 'ph_net', 'ph_sales', 'ph_returns', 'ph_cost', 'ph_profit', 'legacy_ph', 'lab_total', 'expenses', 'withdrawals', 'wd_personal', 'purchases', 'supplier_paid', 'ph_count', 'visits', 'lab_count', 'ipd', 'wd_reception'].forEach(k => o[k] = r2(sumBy(rows, k)));
+    o.net_profit = r2(o.ph_profit + o.lab_total + o.reception + o.ipd - o.expenses);
     return o;
   });
 }
@@ -188,8 +188,8 @@ Pages.purchases = {
   }
 };
 
-async function openPurchase(id, after) {
-  const p = id ? await API.get('/api/purchases/' + id) : { date: today(), pay_type: 'cash', received: 1, has_items: 1, discount: 0, items: [], payments: [] };
+async function openPurchase(id, after, prefill) {
+  const p = id ? await API.get('/api/purchases/' + id) : { date: today(), pay_type: 'cash', received: 1, has_items: 1, discount: 0, items: [], payments: [], ...(prefill || {}) };
   const sups = await API.list('suppliers', { limit: 2000 });
   const items = (p.items || []).map(i => ({ ...i }));
   const defMk = Number(App.settings.default_markup || 30);
@@ -420,7 +420,7 @@ Pages.daily = {
       <div class="filterBar"><label class="field"><span>از</span>${dateInput('from', mf, 'id="d_from"')}</label><label class="field"><span>تا</span>${dateInput('to', mt, 'id="d_to"')}</label>
         <div class="chips">${lastMonths(4).reverse().map(m => `<button type="button" class="chip" data-m="${m.range[0]}|${m.range[1]}">${esc(m.label)}</button>`).join('')}</div></div>
       <div class="grid g4" id="dK" style="margin-bottom:16px"></div>
-      <div class="card"><div class="tableWrap"><table class="t" id="dT"><thead><tr><th>تاریخ</th><th>فروشات دواخانه</th><th>برداشتی دواخانه</th><th>برداشت توسط</th><th>لابراتوار</th><th>برداشتی لابراتوار</th><th>برداشت شخصی</th><th>فیس پذیرش</th><th>مصارف</th><th>مفاد دواخانه</th><th>باقی بعد از برداشت</th></tr></thead><tbody id="dB"></tbody><tfoot id="dF"></tfoot></table></div></div>`;
+      <div class="card"><div class="tableWrap"><table class="t" id="dT"><thead><tr><th>تاریخ</th><th>فروشات دواخانه</th><th>برداشتی دواخانه</th><th>برداشت توسط</th><th>لابراتوار</th><th>برداشتی لابراتوار</th><th>برداشت شخصی</th><th>فیس پذیرش</th><th>بستر</th><th>مصارف</th><th>مفاد دواخانه</th><th>باقی بعد از برداشت</th></tr></thead><tbody id="dB"></tbody><tfoot id="dF"></tfoot></table></div></div>`;
     let rows = [], wds = [];
     const load = async () => {
       const from = dateOf($('#d_from', view)), to = dateOf($('#d_to', view));
@@ -428,16 +428,16 @@ Pages.daily = {
       rows = rows.filter(r => r.income || r.withdrawals || r.expenses);
       const by = (d) => [...new Set(wds.filter(w => w.date === d && w.by_whom).map(w => w.by_whom))].join('، ');
       $('#dB', view).innerHTML = rows.map(r => `<tr><td>${fmtDateNum(r.date)} <small class="muted">${weekday(r.date)}</small></td><td class="money">${money(r.ph_net)}</td><td class="neg">${r.wd_pharmacy ? money(r.wd_pharmacy) : ''}</td><td>${esc(by(r.date))}</td><td>${money(r.lab_total)}</td><td class="neg">${r.wd_lab ? money(r.wd_lab) : ''}</td><td class="neg">${r.wd_personal ? money(r.wd_personal) : ''}</td>
-        <td>${money(r.reception)}</td><td class="neg">${r.expenses ? money(r.expenses) : ''}</td><td class="pos">${r.ph_profit ? money(r.ph_profit) : ''}</td><td class="money">${money(r.cash_left)}</td></tr>`).join('') || emptyRow(11);
+        <td>${money(r.reception)}</td><td>${r.ipd ? money(r.ipd) : ''}</td><td class="neg">${r.expenses ? money(r.expenses) : ''}</td><td class="pos">${r.ph_profit ? money(r.ph_profit) : ''}</td><td class="money">${money(r.cash_left)}</td></tr>`).join('') || emptyRow(12);
       const S = (k) => r2(sumBy(rows, k));
-      $('#dF', view).innerHTML = `<tr><td>مجموع</td><td>${money(S('ph_net'))}</td><td>${money(S('wd_pharmacy'))}</td><td></td><td>${money(S('lab_total'))}</td><td>${money(S('wd_lab'))}</td><td>${money(S('wd_personal'))}</td><td>${money(S('reception'))}</td><td>${money(S('expenses'))}</td><td>${money(S('ph_profit'))}</td><td>${money(S('cash_left'))}</td></tr>`;
+      $('#dF', view).innerHTML = `<tr><td>مجموع</td><td>${money(S('ph_net'))}</td><td>${money(S('wd_pharmacy'))}</td><td></td><td>${money(S('lab_total'))}</td><td>${money(S('wd_lab'))}</td><td>${money(S('wd_personal'))}</td><td>${money(S('reception'))}</td><td>${money(S('ipd'))}</td><td>${money(S('expenses'))}</td><td>${money(S('ph_profit'))}</td><td>${money(S('cash_left'))}</td></tr>`;
       $('#dK', view).innerHTML = kpi('فروشات دواخانه', money(S('ph_net')), { ic: 'pill', cls: 'good' }) + kpi('لابراتوار', money(S('lab_total')), { ic: 'flask' }) + kpi('مجموع برداشت‌ها', money(S('withdrawals')), { ic: 'wallet', cls: 'warn' }) + kpi('باقی بعد از برداشت و مصارف', money(S('cash_left')), { ic: 'money', cls: 'violet' });
     };
     $$('#d_from, #d_to', view).forEach(el => el.addEventListener('change', load));
     $$('[data-m]', view).forEach(c => c.onclick = () => { const [a, b] = c.dataset.m.split('|'); setDateInput($('#d_from', view), a); setDateInput($('#d_to', view), b); });
     actions(view, {
       wd: () => withdrawalDialog('pharmacy', load),
-      csv: () => exportCSV('daily-accounts', rows, [[r => fmtDateNum(r.date), 'تاریخ'], ['ph_net', 'فروشات دواخانه'], ['wd_pharmacy', 'برداشتی دواخانه'], ['lab_total', 'لابراتوار'], ['wd_lab', 'برداشتی لابراتوار'], ['wd_personal', 'برداشت شخصی'], ['reception', 'فیس پذیرش'], ['expenses', 'مصارف'], ['ph_profit', 'مفاد دواخانه'], ['cash_left', 'باقی']]),
+      csv: () => exportCSV('daily-accounts', rows, [[r => fmtDateNum(r.date), 'تاریخ'], ['ph_net', 'فروشات دواخانه'], ['wd_pharmacy', 'برداشتی دواخانه'], ['lab_total', 'لابراتوار'], ['wd_lab', 'برداشتی لابراتوار'], ['wd_personal', 'برداشت شخصی'], ['reception', 'فیس پذیرش'], ['ipd', 'بستر'], ['expenses', 'مصارف'], ['ph_profit', 'مفاد دواخانه'], ['cash_left', 'باقی']]),
       print: () => previewDoc(reportDocHTML('حسابات روزانه', `<table class="rt">${$('#dT', view).innerHTML}</table>`, `${fmtDate(dateOf($('#d_from', view)))} — ${fmtDate(dateOf($('#d_to', view)))}`), { title: 'حسابات روزانه' })
     });
     await load();
@@ -451,23 +451,23 @@ Pages.monthly = {
     view.innerHTML = `<div class="pageHead"><div><h1>گزارش ماهانه و مفاد</h1><p>فروش کل دواخانه، قیمت تمام شد، مفاد، عاید لابراتوار و پذیرش، مصارف و مفاد خالص هر ماه.</p></div><div class="toolbar"><button class="btn" data-act="csv">${icon('download')} CSV</button><button class="btn" data-act="print">${icon('print')} چاپ</button></div></div>
       <div class="grid g4" id="mK"></div>
       <div class="card" style="margin-top:16px"><h2>مفاد خالص ماهانه</h2><div id="lg"></div><div class="chartBox tall"><canvas id="mC"></canvas></div></div>
-      <div class="card"><div class="tableWrap"><table class="t" id="mT"><thead><tr><th>ماه</th><th>فروش دواخانه</th><th>قیمت تمام شد</th><th>مفاد دواخانه</th><th>فیصدی مفاد</th><th>لابراتوار</th><th>پذیرش</th><th>مصارف</th><th>مفاد خالص</th><th>خرید دوا</th><th>پرداخت به کمپنی‌ها</th><th>برداشت‌ها</th></tr></thead><tbody id="mB"></tbody><tfoot id="mF"></tfoot></table></div></div>
+      <div class="card"><div class="tableWrap"><table class="t" id="mT"><thead><tr><th>ماه</th><th>فروش دواخانه</th><th>قیمت تمام شد</th><th>مفاد دواخانه</th><th>فیصدی مفاد</th><th>لابراتوار</th><th>پذیرش</th><th>بستر</th><th>مصارف</th><th>مفاد خالص</th><th>خرید دوا</th><th>پرداخت به کمپنی‌ها</th><th>برداشت‌ها</th></tr></thead><tbody id="mB"></tbody><tfoot id="mF"></tfoot></table></div></div>
       <div class="card"><div class="cardHead"><h2>پرفروش‌ترین دواهای ماه</h2><select id="mSel" style="width:auto">${months.slice().reverse().map(m => `<option value="${m.range[0]}|${m.range[1]}">${esc(m.label)}</option>`).join('')}</select></div><div id="mTop"></div></div>`;
     const days = await API.get('/api/reports/days', { from: months[0].range[0], to: months[months.length - 1].range[1] });
     const agg = monthsAgg(days, months);
     const cur = agg[agg.length - 1], prev = agg[agg.length - 2] || {};
     const delta = (a, b) => b ? `<span class="delta ${a >= b ? 'up' : 'down'}">${a >= b ? '▲' : '▼'} ${Math.abs(Math.round((a - b) / (b || 1) * 100))}٪ نسبت به ماه قبل</span>` : '';
     $('#mK', view).innerHTML = kpi('فروش دواخانه این ماه', money(cur.ph_net), { ic: 'pill', cls: 'good', sub: delta(cur.ph_net, prev.ph_net) }) + kpi('مفاد دواخانه این ماه', money(cur.ph_profit), { ic: 'trend', sub: cur.ph_net ? `${Math.round(cur.ph_profit / Math.max(1, cur.ph_sales - cur.ph_returns) * 100)}٪ مفاد` : '' })
-      + kpi('مصارف این ماه', money(cur.expenses), { ic: 'receipt', cls: 'bad', sub: delta(cur.expenses, prev.expenses) }) + kpi('مفاد خالص این ماه', money(cur.net_profit), { ic: 'money', cls: 'violet', sub: 'دواخانه + لابراتوار + پذیرش − مصارف' });
+      + kpi('مصارف این ماه', money(cur.expenses), { ic: 'receipt', cls: 'bad', sub: delta(cur.expenses, prev.expenses) }) + kpi('مفاد خالص این ماه', money(cur.net_profit), { ic: 'money', cls: 'violet', sub: 'دواخانه + لابراتوار + پذیرش + بستر − مصارف' });
     $('#lg', view).innerHTML = legendHTML([{ label: 'مفاد دواخانه' }, { label: 'لابراتوار' }, { label: 'پذیرش' }, { label: 'مصارف' }, { label: 'مفاد خالص' }]);
     barChart($('#mC', view), agg.map(m => m.short), [{ label: 'مفاد دواخانه', data: agg.map(m => m.ph_profit) }, { label: 'لابراتوار', data: agg.map(m => m.lab_total) }, { label: 'پذیرش', data: agg.map(m => m.reception) }, { label: 'مصارف', data: agg.map(m => -m.expenses) }, { label: 'مفاد خالص', data: agg.map(m => m.net_profit), type: 'line' }], { money: true });
-    $('#mB', view).innerHTML = agg.slice().reverse().map(m => `<tr><td><b>${esc(m.label)}</b></td><td class="money">${money(m.ph_net)}</td><td>${money(m.ph_cost)}</td><td class="pos">${money(m.ph_profit)}</td><td>${m.ph_sales ? Math.round(m.ph_profit / Math.max(1, m.ph_sales - m.ph_returns) * 100) + '٪' : ''}</td><td>${money(m.lab_total)}</td><td>${money(m.reception)}</td><td class="neg">${money(m.expenses)}</td><td class="money ${m.net_profit >= 0 ? 'pos' : 'neg'}">${money(m.net_profit)}</td><td>${money(m.purchases)}</td><td>${money(m.supplier_paid)}</td><td>${money(m.withdrawals)}</td></tr>`).join('');
+    $('#mB', view).innerHTML = agg.slice().reverse().map(m => `<tr><td><b>${esc(m.label)}</b></td><td class="money">${money(m.ph_net)}</td><td>${money(m.ph_cost)}</td><td class="pos">${money(m.ph_profit)}</td><td>${m.ph_sales ? Math.round(m.ph_profit / Math.max(1, m.ph_sales - m.ph_returns) * 100) + '٪' : ''}</td><td>${money(m.lab_total)}</td><td>${money(m.reception)}</td><td>${money(m.ipd)}</td><td class="neg">${money(m.expenses)}</td><td class="money ${m.net_profit >= 0 ? 'pos' : 'neg'}">${money(m.net_profit)}</td><td>${money(m.purchases)}</td><td>${money(m.supplier_paid)}</td><td>${money(m.withdrawals)}</td></tr>`).join('');
     const S = (k) => sumBy(agg, k);
-    $('#mF', view).innerHTML = `<tr><td>۱۲ ماه</td><td>${money(S('ph_net'))}</td><td>${money(S('ph_cost'))}</td><td>${money(S('ph_profit'))}</td><td></td><td>${money(S('lab_total'))}</td><td>${money(S('reception'))}</td><td>${money(S('expenses'))}</td><td>${money(S('net_profit'))}</td><td>${money(S('purchases'))}</td><td>${money(S('supplier_paid'))}</td><td>${money(S('withdrawals'))}</td></tr>`;
+    $('#mF', view).innerHTML = `<tr><td>۱۲ ماه</td><td>${money(S('ph_net'))}</td><td>${money(S('ph_cost'))}</td><td>${money(S('ph_profit'))}</td><td></td><td>${money(S('lab_total'))}</td><td>${money(S('reception'))}</td><td>${money(S('ipd'))}</td><td>${money(S('expenses'))}</td><td>${money(S('net_profit'))}</td><td>${money(S('purchases'))}</td><td>${money(S('supplier_paid'))}</td><td>${money(S('withdrawals'))}</td></tr>`;
     const loadTop = async () => { const [a, b] = $('#mSel', view).value.split('|'); const r = (await API.get('/api/reports/medicine-sales', { from: a, to: b })).slice(0, 20); $('#mTop', view).innerHTML = `<table class="t"><thead><tr><th>دوا</th><th>تعداد</th><th>فروش</th><th>قیمت تمام شد</th><th>مفاد</th></tr></thead><tbody>${r.map(x => `<tr><td class="en">${esc(x.name)}</td><td>${fmtNum(x.qty)}</td><td>${money(x.revenue)}</td><td>${money(x.cost)}</td><td class="pos">${money(x.profit)}</td></tr>`).join('') || emptyRow(5)}</tbody></table>`; };
     $('#mSel', view).onchange = loadTop; loadTop();
     actions(view, {
-      csv: () => exportCSV('monthly-report', agg, [['label', 'ماه'], ['ph_net', 'فروش دواخانه'], ['ph_cost', 'قیمت تمام شد'], ['ph_profit', 'مفاد دواخانه'], ['lab_total', 'لابراتوار'], ['reception', 'پذیرش'], ['expenses', 'مصارف'], ['net_profit', 'مفاد خالص'], ['purchases', 'خرید دوا'], ['supplier_paid', 'پرداخت به کمپنی'], ['withdrawals', 'برداشت']]),
+      csv: () => exportCSV('monthly-report', agg, [['label', 'ماه'], ['ph_net', 'فروش دواخانه'], ['ph_cost', 'قیمت تمام شد'], ['ph_profit', 'مفاد دواخانه'], ['lab_total', 'لابراتوار'], ['reception', 'پذیرش'], ['ipd', 'بستر'], ['expenses', 'مصارف'], ['net_profit', 'مفاد خالص'], ['purchases', 'خرید دوا'], ['supplier_paid', 'پرداخت به کمپنی'], ['withdrawals', 'برداشت']]),
       print: () => previewDoc(reportDocHTML('گزارش ماهانه و مفاد', `<table class="rt">${$('#mT', view).innerHTML}</table>`), { title: 'گزارش ماهانه' })
     });
   }
@@ -518,5 +518,41 @@ Pages.import = {
         });
       }
     });
+  }
+};
+
+// ================================================================ automatic re-order suggestions → purchase order / factor
+Pages.reorder = {
+  async render(view) {
+    view.innerHTML = `<div class="pageHead"><div><h1>سفارش خرید (کمبودها)</h1><p>دواهایی که موجودی آن‌ها به حد سفارش رسیده؛ مقدار پیشنهادی از فروش ۳۰ روز گذشته حساب می‌شود. سفارش را چاپ کنید یا مستقیم فاکتور خرید بسازید.</p></div>
+      <div class="toolbar"><button class="btn" data-act="print">${icon('print')} چاپ سفارش</button>${isRole('stock') ? `<button class="btn primary" data-act="factor">${icon('truck')} ساختن فاکتور خرید از انتخاب‌ها</button>` : ''}</div></div>
+      <div class="filterBar"><label class="field"><span>کمپنی (آخرین خرید)</span><select id="roSup"></select></label><label class="field grow"><span>جستجو</span><input id="roQ"></label></div>
+      <div class="card"><div class="tableWrap"><table class="t"><thead><tr><th><input type="checkbox" id="roAll" checked></th><th>کد</th><th>دوا</th><th>موجودی</th><th>حد سفارش</th><th>فروش ۳۰ روز</th><th>مقدار سفارش</th><th>آخرین قیمت خرید</th><th>جمع</th><th>آخرین کمپنی</th></tr></thead><tbody id="roB"></tbody><tfoot id="roF"></tfoot></table></div></div>`;
+    const rows = await API.get('/api/stock/reorder');
+    const st = new Map(rows.map(r => [r.id, { on: true, qty: r.suggest }]));
+    const sups = [...new Set(rows.map(r => r.last_supplier).filter(Boolean))];
+    $('#roSup', view).innerHTML = opt(sups, '', { empty: 'همه' });
+    const visible = () => { const q = $('#roQ', view).value.trim().toLowerCase(), sp = $('#roSup', view).value; return rows.filter(r => (!sp || r.last_supplier === sp) && (!q || [r.name, r.generic, String(r.code)].some(x => String(x || '').toLowerCase().includes(q)))); };
+    const draw = () => {
+      const list = visible();
+      $('#roB', view).innerHTML = list.map(r => { const x = st.get(r.id); return `<tr data-id="${r.id}" class="${r.stock <= 0 ? 'short' : ''}"><td><input type="checkbox" data-on ${x.on ? 'checked' : ''}></td><td class="codeTag">${r.code}</td><td class="en"><b>${esc(r.name)}</b> <small class="muted">${esc([r.form, r.strength].filter(Boolean).join(' '))}</small></td>
+        <td class="${r.stock <= 0 ? 'neg' : ''}">${fmtNum(r.stock)}</td><td>${fmtNum(r.reorder_level)}</td><td>${fmtNum(r.sold_30)}</td><td><input type="number" data-qty value="${x.qty}" style="width:90px"></td><td>${money(r.last_buy)}</td><td class="money">${money(x.qty * (r.last_buy || 0))}</td><td>${esc(r.last_supplier || '—')}</td></tr>`; }).join('') || emptyRow(10, 'کمبودی نیست ✓');
+      const sel = list.filter(r => st.get(r.id).on);
+      $('#roF', view).innerHTML = `<tr><td colspan="6">${sel.length} قلم انتخاب شده</td><td></td><td></td><td>${money(sel.reduce((a, r) => a + st.get(r.id).qty * (r.last_buy || 0), 0))}</td><td></td></tr>`;
+    };
+    $('#roB', view).addEventListener('input', (e) => { const tr = e.target.closest('tr[data-id]'); if (!tr) return; const x = st.get(Number(tr.dataset.id)); if (e.target.matches('[data-qty]')) x.qty = Number(e.target.value) || 0; if (e.target.matches('[data-on]')) x.on = e.target.checked; draw(); });
+    $('#roAll', view).onchange = (e) => { visible().forEach(r => { st.get(r.id).on = e.target.checked; }); draw(); };
+    $('#roSup', view).onchange = draw; $('#roQ', view).addEventListener('input', debounce(draw, 200));
+    const chosen = () => visible().filter(r => st.get(r.id).on && st.get(r.id).qty > 0);
+    actions(view, {
+      print: () => { const list = chosen(); previewDoc(reportDocHTML('سفارش خرید دوا' + ($('#roSup', view).value ? ' — ' + $('#roSup', view).value : ''), `<table class="rt rtl"><thead><tr><th>#</th><th>کد</th><th>دوا</th><th>موجودی</th><th>مقدار سفارش</th><th>قیمت تخمینی</th><th>جمع</th></tr></thead><tbody>${list.map((r, i) => `<tr><td>${i + 1}</td><td>${r.code}</td><td class="en">${esc(r.name)} ${esc(r.strength || '')}</td><td>${fmtNum(r.stock)}</td><td><b>${fmtNum(st.get(r.id).qty)}</b></td><td>${money(r.last_buy)}</td><td>${money(st.get(r.id).qty * (r.last_buy || 0))}</td></tr>`).join('')}</tbody></table>`, fmtDate(today())), { title: 'سفارش خرید' }); },
+      factor: () => {
+        const list = chosen(); if (!list.length) throw new Error('دوایی انتخاب نشده');
+        const mk = Number(App.settings.default_markup || 30);
+        const items = list.map(r => ({ medicine_id: r.id, med_code: r.code, name: r.name, strength: r.strength, batch_no: '', expiry: '', qty: st.get(r.id).qty, bonus: 0, buy_price: r.last_buy || 0, markup_pct: r.markup_pct || mk, sell_price: r.sell_price }));
+        openPurchase(null, () => go('reorder'), { supplier_name: $('#roSup', view).value || list[0].last_supplier || '', items, notes: 'از سفارش خرید (کمبودها)' });
+      }
+    });
+    draw();
   }
 };

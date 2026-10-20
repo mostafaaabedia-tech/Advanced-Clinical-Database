@@ -87,10 +87,27 @@ const ok = (m) => console.log('  ✓', m);
   // edit purchase quantity, cannot drop below sold
   await assert.rejects(call(S, 'POST', '/api/purchases/save', { ...pur, items: [{ ...pur.items[0], qty: 5 }, pur.items[1]] }), /کمتر از مقدار فروخته/); ok('purchase edit below sold qty blocked');
 
-  // laboratory
+  // central cashier: the pharmacy sale above was not paid at the pharmacy → reception collects it
+  assert.equal(sale.paid, 0); ok('central cashier: pharmacy sale waits for payment at reception');
+  const pend = await call(R, 'GET', '/api/cashier/pending');
+  assert.ok(pend.sales.find(x => x.id === sale.id)); assert.ok(pend.labs.find(x => x.lab_code === enc.lab.lab_code)); ok('reception sees pharmacy + lab bills');
+  const saleBal = (await call(R, 'GET', '/api/get/sales/' + sale.id)).balance;
+  await call(R, 'POST', '/api/cashier/pay', { kind: 'sale', id: sale.id, amount: saleBal });
+  assert.equal((await call(P, 'GET', '/api/sales/' + sale.id)).balance, 0); ok(`reception collected pharmacy bill ${saleBal}`);
+  await assert.rejects(call(P, 'POST', '/api/sales/pay/' + sale.id, { amount: 1 }), /صندوق/); ok('pharmacy cannot take money in central mode');
+
+  // laboratory materials (reagents) used automatically per test
+  const item = await call(L, 'POST', '/api/save/lab_items', { name: 'CBC reagent', unit: 'تست', reorder_level: 5 });
+  await call(L, 'POST', '/api/lab/items/move', { item_id: item, qty: 100, kind: 'in', unit_cost: 10 });
+  const cbcFull = (await call(L, 'GET', '/api/lab/catalog')).tests.find(t => t.code === 'CBC');
+  await call(L, 'POST', '/api/lab/test/save', { id: cbcFull.id, items: [{ item_id: item, qty: 1 }] });
+
+  // laboratory: billed at reception (clinic reception ↔ lab reception), results at the lab
   const lr = await call(L, 'GET', '/api/lab/req/' + enc.lab.lab_code);
-  const rec = await call(L, 'POST', '/api/lab/receive/' + lr.id, { discount: 0 });
+  const labBill = await call(R, 'POST', '/api/cashier/pay', { kind: 'lab', id: lr.id, amount: lr.subtotal, discount: 0 });
+  const rec = labBill.data;
   assert.equal(rec.status, 'received'); assert.equal(rec.paid, rec.net);
+  assert.equal((await call(L, 'GET', '/api/lab/items/' + item)).stock, 99); ok('lab billed & paid at reception, reagent stock 100 → 99');
   const results = rec.tests.filter(t => t.result_type === 'numeric').map(t => ({ test_id: t.id, value: t.code === 'HGB' ? '9.5' : '5', flag: t.code === 'HGB' ? 'L' : null }));
   const done = await call(L, 'POST', '/api/lab/results/' + rec.id, { results, status: 'approved' });
   assert.equal(done.status, 'approved'); ok(`lab ${done.lab_code}: received ${rec.net}, ${results.length} results approved`);
@@ -98,6 +115,36 @@ const ok = (m) => console.log('  ✓', m);
   assert.ok(file.labs[0].results.length >= results.length); assert.equal(file.prescriptions.length, 1); ok('doctor sees lab results + prescription in patient file');
   const walk = await call(L, 'POST', '/api/lab/walkin', { patient: { full_name: 'کریم', sex: 'M', age_years: 40 }, test_ids: [hb.id] });
   ok('walk-in lab request ' + walk.lab_code);
+  const rwalk = await call(R, 'POST', '/api/lab/walkin', { patient: { full_name: 'نسیمه', sex: 'F', age_years: 3, age_months: 4 }, test_ids: [cbc.id] });
+  const rpaid = await call(R, 'POST', '/api/lab/receive/' + rwalk.id, {});
+  assert.equal(rpaid.paid, rpaid.net); assert.equal((await call(L, 'GET', '/api/lab/items/' + item)).stock, 98); ok('lab registration at reception with payment ' + rwalk.lab_code);
+  await call(L, 'POST', '/api/lab/receive/' + walk.id, {}); await call(L, 'POST', '/api/lab/cancel/' + walk.id, { reason: 'test' }); ok('lab cancel returns materials');
+  await assert.rejects(call(R, 'POST', '/api/lab/results/' + rec.id, { results: [] }), /دسترسی/); ok('reception cannot enter lab results');
+
+  // deposits, in-patients (beds), day accounts, cash close
+  await call(R, 'POST', '/api/cashier/deposit', { patient_id: v.patient_id, amount: 1000 });
+  const board = await call(R, 'GET', '/api/ipd/board'); const bed = board[0].beds[0];
+  const adm = await call(R, 'POST', '/api/ipd/admit', { patient_id: v.patient_id, doctor_id: drAbedi.id, bed_id: bed.id, diagnosis: 'Dehydration', deposit: 500 });
+  await assert.rejects(call(R, 'POST', '/api/ipd/admit', { patient: { full_name: 'x' }, bed_id: bed.id }), /خالی نیست/);
+  await call(D, 'POST', '/api/ipd/charge/' + adm.id, { name: 'سیروم', amount: 300 });
+  const bed2 = board[0].beds[1]; await call(R, 'POST', '/api/ipd/transfer/' + adm.id, { bed_id: bed2.id });
+  const dis = await call(R, 'POST', '/api/ipd/discharge/' + adm.id, { discount: 0 });
+  assert.equal(dis.status, 'discharged'); assert.ok(dis.net >= 1300);
+  const payAdm = await call(R, 'POST', '/api/cashier/pay', { kind: 'admission', id: adm.id, amount: dis.net - dis.paid - 200 });
+  await call(R, 'POST', '/api/cashier/pay', { kind: 'admission', id: adm.id, amount: 200, from_deposit: 1 });
+  const acc = await call(R, 'GET', '/api/cashier/patient/' + v.patient_id);
+  assert.equal(acc.deposit, 800); assert.equal(acc.admissions[0].balance, 0); ok(`in-patient ${adm.adm_no}: bed + charges ${dis.net}, paid (deposit left ${acc.deposit})`);
+  const tday = srv.ops.today();
+  const day = await call(R, 'GET', '/api/cashier/day?from=' + tday);
+  assert.ok(day.totals.sale > 0 && day.totals.lab > 0 && day.totals.visit > 0 && day.totals.admission > 0); ok(`reception day accounts: all ${day.totals.all} (fees ${day.totals.visit}, lab ${day.totals.lab}, pharmacy ${day.totals.sale}, beds ${day.totals.admission})`);
+  const close = await call(R, 'POST', '/api/cashier/close', { counted: day.totals.net, handed_to: 'مدیر' }); assert.equal(close.difference, 0); ok('cash close recorded');
+
+  // doctors load & schedule, queue display, reorder suggestions, alternatives
+  await call(A, 'POST', '/api/doctors/schedule/' + drAbedi.id, { rows: [{ weekday: new Date().getDay(), start_time: '08:00', end_time: '12:00', max_patients: 20 }] });
+  const load = await call(R, 'GET', '/api/doctor-load'); assert.equal(load.find(d => d.id === drAbedi.id).max_patients, 20); ok('doctor schedule & load');
+  await call(D, 'POST', '/api/visits/call/' + v.id); const disp = await call(R, 'GET', '/api/queue/display'); ok('queue display groups: ' + disp.groups.length);
+  const reo = await call(S, 'GET', '/api/stock/reorder'); assert.ok(reo.length > 0); ok('purchase suggestions: ' + reo.length);
+  await call(A, 'POST', '/api/save/medical_departments', { name: 'جلدی' }); await call(R, 'POST', '/api/save/doctors', { name: 'تست', title: 'دوکتور', department_id: 1, work_type: 'داکتر عمومی' }); ok('departments & doctors added');
 
   // expenses, withdrawals, reports
   await call(S, 'POST', '/api/save/expenses', { item: 'بل برق', category: 'بل برق', amount: 2000, by_whom: 'مصطفی' });
@@ -105,7 +152,7 @@ const ok = (m) => console.log('  ✓', m);
   const t = srv.ops.today();
   const days = await call(S, 'GET', `/api/reports/days?from=${t}&to=${t}`);
   const d0 = days[0];
-  assert.equal(d0.ph_sales, 314.55); assert.equal(d0.reception, 450 - 50); assert.equal(d0.expenses, 2000); assert.equal(d0.wd_pharmacy, 100);
+  assert.equal(d0.ph_sales, 314.55); assert.equal(d0.reception, 450 - 50); assert.equal(d0.expenses, 2000); assert.equal(d0.wd_pharmacy, 100); assert.ok(d0.ipd > 0);
   ok(`daily: reception ${d0.reception}, pharmacy ${d0.ph_net} (profit ${d0.ph_profit}), lab ${d0.lab_total}, expenses ${d0.expenses}, cash left ${d0.cash_left}`);
   const pd = await call(P, 'GET', `/api/reports/days?from=${t}&to=${t}`); assert.equal(pd[0].expenses, undefined); ok('pharmacy gets only its own daily figures');
   const dash = await call(A, 'GET', '/api/reports/dashboard'); assert.ok(dash.stock.items > 0); ok('admin dashboard');

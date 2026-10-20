@@ -36,7 +36,18 @@ function resolveRange(t, sex, ageDays) {
   const rs = (t.ranges || []).filter(r => (r.sex === 'A' || r.sex === sex) && (r.age_min_days === null || ageDays === null || ageDays >= r.age_min_days) && (r.age_max_days === null || ageDays === null || ageDays < r.age_max_days));
   const span = (x) => (x.age_max_days ?? 1e7) - (x.age_min_days ?? 0);
   rs.sort((a, b) => (b.sex !== 'A') - (a.sex !== 'A') || span(a) - span(b));
-  const r = rs[0]; return r ? { low: r.low, high: r.high, text: r.text } : { low: t.ref_low, high: t.ref_high, text: null };
+  const r = rs[0];
+  let out = r ? { low: num(r.low), high: num(r.high), text: r.text } : { low: num(t.ref_low), high: num(t.ref_high), text: null };
+  // a range written only as text ("4.5 - 11", "< 200") is used for the H / L flag too
+  if (out.low === null && out.high === null) { const pr = parseRangeText(r ? r.text : t.ref_text); if (pr) out = { ...out, ...pr }; }
+  return out;
+}
+function parseRangeText(txt) {
+  const s = String(txt || '').replace(/٫/g, '.').replace(/(\d),(\d{3})/g, '$1$2').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).trim();
+  let m = s.match(/^(-?\d+(?:\.\d+)?)\s*(?:-|–|—|~|to)\s*(-?\d+(?:\.\d+)?)\s*[a-zA-Z/%µ.]*$/i); if (m) return { low: Number(m[1]), high: Number(m[2]) };
+  m = s.match(/^(?:<|≤|<=|up\s*to|less\s*than)\s*(\d+(?:\.\d+)?)/i); if (m) return { low: null, high: Number(m[1]) };
+  m = s.match(/^(?:>|≥|>=|more\s*than)\s*(\d+(?:\.\d+)?)/i); if (m) return { low: Number(m[1]), high: null };
+  return null;
 }
 function refDisplay(t, r) {
   if (r.text) return r.text;
@@ -108,29 +119,31 @@ Pages['lab-work'] = {
       drawResults(ageDays);
     };
     // ---------- billing ----------
+    const central = (App.settings.cashier_mode || 'central') === 'central' && App.user.station === 'lab';
     const drawBilling = () => {
       const sel = r.items.map(i => i.test_id);
       $('#workBody', view).innerHTML = `<div class="recGrid"><div class="card"><h2>${icon('flask')} آزمایش‌ها</h2>
         <div class="searchBox" style="margin-bottom:10px"><input id="tq" placeholder="افزودن آزمایش: کد، نام یا نمبر…"></div><div class="selList" id="tl"></div></div>
         <div class="card"><h2>${icon('money')} فیس و رسید</h2><div class="totals"><div><span>جمع کل</span><b id="bSub"></b></div>
           <div><span>تخفیف ٪ ${r.discount_pct ? `<small class="pos">(داکتر: ${fmtNum(r.discount_pct)}٪)</small>` : ''}</span><span class="bar"><input type="number" id="bPct" value="${r.discount_pct || 0}" style="width:70px"> <small>یا مبلغ</small> <input type="number" id="bAmt" style="width:90px"></span></div><div><span>قابل پرداخت</span><b id="bNet"></b></div></div>
-          <div class="formGrid" style="margin-top:10px"><label class="field"><span>دریافت شده</span><input type="number" id="bPaid"></label><label class="field"><span>طریقه</span><select id="bPm">${opt(Object.entries(PAY_METHODS), 'cash')}</select></label></div>
-          <div class="stack" style="margin-top:12px"><button class="btn primary lg" data-act="receive" data-print="1" style="justify-content:center">${icon('print')} پذیرش، دریافت فیس و چاپ دو رسید</button><button class="btn" data-act="receive" style="justify-content:center">${icon('check')} پذیرش بدون چاپ</button>
+          ${central ? `<div class="infoBox" style="margin-top:10px">${icon('cash', 15)} فیس در <b>صندوق پذیرش</b> گرفته می‌شود — بعد از پذیرش، بل به صندوق می‌رود.</div><input type="hidden" id="bPaid"><input type="hidden" id="bPm" value="cash">`
+            : `<div class="formGrid" style="margin-top:10px"><label class="field"><span>دریافت شده</span><input type="number" id="bPaid"></label><label class="field"><span>طریقه</span><select id="bPm">${opt(Object.entries(PAY_METHODS), 'cash')}</select></label></div>`}
+          <div class="stack" style="margin-top:12px"><button class="btn primary lg" data-act="receive" data-print="1" style="justify-content:center">${icon('print')} ${central ? 'پذیرش، ارسال بل به صندوق و چاپ دو رسید' : 'پذیرش، دریافت فیس و چاپ دو رسید'}</button><button class="btn" data-act="receive" style="justify-content:center">${icon('check')} پذیرش بدون چاپ</button>
           <button class="btn dangerText" data-act="cancel" style="justify-content:center">${icon('x')} لغو درخواست</button></div></div></div>`;
       const calc = () => {
         const sub = sel.reduce((a, id) => a + (cat.byId.get(id)?.price || 0), 0);
         const disc = $('#bAmt', view).value !== '' ? Math.min(sub, Number($('#bAmt', view).value) || 0) : r2(sub * (Number($('#bPct', view).value) || 0) / 100);
         $('#bSub', view).textContent = money(sub); $('#bNet', view).textContent = money(sub - disc) + ' ' + currency();
-        if (!$('#bPaid', view).dataset.t) $('#bPaid', view).value = r2(sub - disc);
-        $('#tl', view).innerHTML = sel.map(id => { const t = cat.byId.get(id); return `<div class="selRow"><span class="codeTag">${t.num_code || ''} ${esc(t.code)}</span><span class="nm">${esc(t.name)}</span><b>${money(t.price)}</b><button class="btn ghost icon" data-rm="${id}">${icon('x', 14)}</button></div>`; }).join('') || '<div class="empty">آزمایشی نیست</div>';
+        if (!central && !$('#bPaid', view).dataset.t) $('#bPaid', view).value = r2(sub - disc);
+        $('#tl', view).innerHTML = sel.map(id => { const t = cat.byId.get(id); return `<div class="selRow"><span class="codeTag" title="${esc(t.name)}">${t.num_code || ''} ${esc(t.code)}</span><span class="nm muted small">${t.is_panel ? 'پنل' : ''}</span><b>${money(t.price)}</b><button class="btn ghost icon" data-rm="${id}">${icon('x', 14)}</button></div>`; }).join('') || '<div class="empty">آزمایشی نیست</div>';
       };
       autocomplete($('#tq', view), { fetch: async (q) => { const s = q.toLowerCase(); return cat.tests.filter(t => t.active && t.orderable && (String(t.num_code) === q || t.code.toLowerCase().includes(s) || t.name.toLowerCase().includes(s))).slice(0, 20); },
         render: (t) => `<span class="code">${t.num_code || ''} ${esc(t.code)}</span><span class="nm">${esc(t.name)}</span><span class="pr">${money(t.price)}</span>`, pick: (t) => { if (!sel.includes(t.id)) sel.push(t.id); $('#tq', view).value = ''; calc(); } });
       $('#tl', view).onclick = (e) => { const b = e.target.closest('[data-rm]'); if (b) { sel.splice(sel.indexOf(Number(b.dataset.rm)), 1); calc(); } };
       $('#bPct', view).oninput = () => { $('#bAmt', view).value = ''; calc(); }; $('#bAmt', view).oninput = calc; $('#bPaid', view).oninput = (e) => e.target.dataset.t = 1;
       view._receive = (btn, print) => busy(btn, async () => {
-        r = await API.post('/api/lab/receive/' + r.id, { test_ids: sel, discount: $('#bAmt', view).value === '' ? undefined : $('#bAmt', view).value, discount_pct: $('#bPct', view).value, paid: $('#bPaid', view).value, pay_method: $('#bPm', view).value });
-        toast(`پذیرش شد — ${r.lab_code}`, 'good');
+        r = await API.post('/api/lab/receive/' + r.id, { test_ids: sel, discount: $('#bAmt', view).value === '' ? undefined : $('#bAmt', view).value, discount_pct: $('#bPct', view).value, paid: central ? undefined : $('#bPaid', view).value, pay_method: $('#bPm', view).value });
+        toast(central && r.net - r.paid > 0.001 ? `پذیرش شد — ${r.lab_code} · ${money(r.net - r.paid)} در صندوق پذیرش پرداخت شود` : `پذیرش شد — ${r.lab_code}`, 'good');
         if (print) await printDoc(labReceiptsHTML(r), { size: 'receipt', title: r.lab_code });
         draw();
       });
@@ -140,8 +153,16 @@ Pages['lab-work'] = {
     const drawResults = (ageDays) => {
       const sex = r.patient.sex; const res = new Map((r.results || []).map(x => [x.test_id, x]));
       const locked = ['approved', 'delivered'].includes(r.status);
-      const groups = new Map();
-      for (const t of r.tests) { const panel = t.panel_id ? r.items.find(i => i.test_id === t.panel_id) : null; const g = panel ? panel.name : (t.dept_name || 'Tests'); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(t); }
+      // one page per department (Haematology, Biochemistry, Hormones …); tests stay grouped by panel inside a page
+      const pages = new Map();
+      for (const t of r.tests) {
+        const pk = t.page_dept || t.dept_name || 'Tests';
+        if (!pages.has(pk)) pages.set(pk, { name: pk, fa: t.page_dept_fa || '', sort: t.page_sort ?? 99, groups: new Map() });
+        const panel = t.panel_id ? r.items.find(i => i.test_id === t.panel_id) : null; const g = panel ? panel.name : (t.dept_name || 'Tests');
+        const P = pages.get(pk); if (!P.groups.has(g)) P.groups.set(g, []); P.groups.get(g).push(t);
+      }
+      const plist = [...pages.values()].sort((a, b) => a.sort - b.sort);
+      let cur = Math.min(view._page || 0, Math.max(0, plist.length - 1));
       const input = (t) => {
         const v = res.get(t.id)?.value ?? '';
         if (t.formula) return `<input data-tid="${t.id}" class="calc" value="${esc(v)}" readonly title="محاسبه خودکار">`;
@@ -149,28 +170,54 @@ Pages['lab-work'] = {
         if (t.result_type === 'memo') return `<textarea data-tid="${t.id}" rows="2" style="direction:ltr" ${locked ? 'readonly' : ''}>${esc(v)}</textarea>`;
         return `<input data-tid="${t.id}" value="${esc(v)}" ${locked ? 'readonly' : ''} autocomplete="off">`;
       };
+      const row = (t) => { const rg = resolveRange(t, sex, ageDays); const note = res.get(t.id)?.note || '';
+        return `<tr data-row="${t.id}"><td class="nm">${esc(t.name)}</td><td class="val">${input(t)}</td><td><span class="flag" data-flag="${t.id}"></span></td><td>${esc(t.unit || '')}</td><td class="muted">${esc(refDisplay(t, rg))}</td>
+          <td class="c"><button type="button" class="btn ghost icon cmtBtn ${note ? 'on' : ''}" data-cmt="${t.id}" title="نظر / توضیح برای داکتر" tabindex="-1">${icon('edit', 13)}</button></td></tr>
+          <tr class="cmtRow ${note ? '' : 'hidden'}" data-cmtrow="${t.id}"><td></td><td colspan="5"><input data-note="${t.id}" value="${esc(note)}" placeholder="نظر برای داکتر — زیر همین آزمایش در راپور چاپ می‌شود" style="direction:rtl" ${locked ? 'readonly' : ''}></td></tr>`; };
       $('#workBody', view).innerHTML = `${locked ? '<div class="infoBox">نتایج تأیید شده و برای داکتر فرستاده شده است.</div>' : ''}
-        ${[...groups.entries()].map(([g, list]) => `<div class="resGroup"><div class="resGroupHead"><span>${esc(g)}</span><small class="muted">${esc(list[0]?.sample || '')}</small></div>
-        <table class="res"><thead><tr><th>Test</th><th>Result</th><th>Flag</th><th>Unit</th><th>Reference</th></tr></thead><tbody>
-        ${list.map(t => { const rg = resolveRange(t, sex, ageDays); return `<tr data-row="${t.id}"><td class="nm">${esc(t.name)}</td><td class="val">${input(t)}</td><td><span class="flag" data-flag="${t.id}"></span></td><td>${esc(t.unit || '')}</td><td class="muted">${esc(refDisplay(t, rg))}</td></tr>`; }).join('')}</tbody></table></div>`).join('')}
+        <div class="bar" style="margin-bottom:10px;flex-wrap:wrap">${r.sampled_at ? pill('نمونه گرفته شد · ' + fmtTime(r.sampled_at), 'good') : `<button class="btn sm" data-act="sample">${icon('check', 13)} نمونه گرفته شد</button>`}<button class="btn sm" data-act="labels">${icon('barcode', 13)} چاپ لیبل تیوب‌ها</button></div>
+        ${plist.length > 1 ? `<div class="deptTabs" id="dTabs">${plist.map((p, i) => `<button type="button" data-pg="${i}" class="${i === cur ? 'on' : ''}">${esc(p.name)}<span class="cnt" data-cnt="${i}"></span></button>`).join('')}<button type="button" data-pg="all">همه</button></div>` : ''}
+        ${plist.map((p, i) => `<div class="deptPage ${i === cur || plist.length === 1 ? 'on' : ''}" data-page="${i}">${[...p.groups.entries()].map(([g, list]) => `<div class="resGroup"><div class="resGroupHead"><span>${esc(g)}</span><small class="muted">${esc(list[0]?.sample || '')}</small></div>
+          <table class="res"><thead><tr><th>Test</th><th>Result</th><th>Flag</th><th>Unit</th><th>Reference</th><th></th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div>`).join('')}
+          ${plist.length > 1 && i < plist.length - 1 ? `<div class="mini muted" style="text-align:left">Enter در آخرین خانه ← صفحه بعد (${esc(plist[i + 1].name)})</div>` : ''}</div>`).join('')}
         <label class="field"><span>یادداشت راپور (Comment)</span><textarea id="repNote" rows="2" style="direction:ltr" ${locked ? 'readonly' : ''}>${esc(r.report_note || '')}</textarea></label>
         <div class="stickyFoot">
           ${locked ? `<button class="btn" data-act="reopen">${icon('edit')} باز کردن برای اصلاح</button>` : `<button class="btn" data-act="saveRes" data-st="">${icon('check')} ذخیره</button><button class="btn" data-act="saveRes" data-st="completed">${icon('check')} تکمیل نتایج</button><button class="btn success lg" data-act="saveRes" data-st="approved">${icon('send')} تأیید نهایی و ارسال به داکتر</button>`}
           <button class="btn primary" data-act="report">${icon('print')} چاپ راپور</button><button class="btn" data-act="receipt">${icon('receipt')} رسیدها</button>
-          ${r.net - r.paid > 0.001 ? `<button class="btn success" data-act="pay">${icon('money')} دریافت باقی ${money(r.net - r.paid)}</button>` : ''}
+          ${r.net - r.paid > 0.001 && !central ? `<button class="btn success" data-act="pay">${icon('money')} دریافت باقی ${money(r.net - r.paid)}</button>` : ''}${r.net - r.paid > 0.001 && central ? `<span class="pill warn">باقی ${money(r.net - r.paid)} — صندوق پذیرش</span>` : ''}
           ${r.status === 'approved' ? `<button class="btn" data-act="deliver">${icon('check')} تحویل به مریض</button>` : ''}</div>`;
       const byId = new Map(r.tests.map(t => [t.id, t]));
+      const showPage = (pg) => {
+        cur = pg === 'all' ? cur : Number(pg); view._page = cur;
+        $$('#dTabs [data-pg]', view).forEach(b => b.classList.toggle('on', b.dataset.pg === String(pg)));
+        $$('.deptPage', view).forEach(d => d.classList.toggle('on', pg === 'all' || d.dataset.page === String(pg)));
+      };
+      const tabs = $('#dTabs', view); if (tabs) tabs.onclick = (e) => { const b = e.target.closest('[data-pg]'); if (!b) return; showPage(b.dataset.pg); const f = $('.deptPage.on [data-tid]:not([readonly])', view); f && f.focus(); };
       const refresh = () => {
         const vals = {};
         $$('[data-tid]', view).forEach(el => { const t = byId.get(Number(el.dataset.tid)); const n = num(el.value); if (n !== null) vals[t.code.toUpperCase()] = n; });
         $$('[data-tid].calc', view).forEach(el => { const t = byId.get(Number(el.dataset.tid)); const v = evalFormula(t.formula, vals, { age: (ageDays || 0) / 365.25, female: sex === 'F' ? 1 : 0 }); el.value = v === null ? '' : fmtNum(v, t.decimals ?? 2); if (v !== null) vals[t.code.toUpperCase()] = v; });
         $$('[data-tid]', view).forEach(el => { const t = byId.get(Number(el.dataset.tid)); const f = computeFlag(t, el.value, resolveRange(t, sex, ageDays)); const fl = $(`[data-flag="${t.id}"]`, view); fl.textContent = f || ''; fl.className = 'flag ' + (f || ''); el.closest('tr').classList.toggle('abn', !!f); el.closest('tr').classList.toggle('crit', f === 'HH' || f === 'LL'); });
+        $$('.deptPage', view).forEach(d => { const ins = $$('[data-tid]', d); const filled = ins.filter(x => String(x.value).trim()).length; const c = $(`[data-cnt="${d.dataset.page}"]`, view); if (c) { c.textContent = `${filled}/${ins.length}`; c.parentElement.classList.toggle('done', ins.length > 0 && filled === ins.length); } });
       };
       $('#workBody', view).addEventListener('input', refresh); $('#workBody', view).addEventListener('change', refresh);
-      $('#workBody', view).addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('input[data-tid]')) { e.preventDefault(); const all = $$('[data-tid]:not([readonly])', view); const i = all.indexOf(e.target); all[i + 1]?.focus(); } });
+      $('#workBody', view).addEventListener('click', (e) => { const b = e.target.closest('[data-cmt]'); if (!b) return; const tr = $(`[data-cmtrow="${b.dataset.cmt}"]`, view); tr.classList.toggle('hidden'); if (!tr.classList.contains('hidden')) $('input', tr).focus(); });
+      $('#workBody', view).addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' || !e.target.matches('input[data-tid], select[data-tid], input[data-note]')) return;
+        e.preventDefault();
+        const page = e.target.closest('.deptPage');
+        const inPage = $$('[data-tid]:not([readonly]):not([disabled])', page);
+        const from = e.target.matches('[data-note]') ? $(`[data-tid="${e.target.dataset.note}"]`, view) : e.target;
+        const i = inPage.indexOf(from);
+        if (i >= 0 && i < inPage.length - 1) return inPage[i + 1].focus();
+        const pi = Number(page.dataset.page);
+        if (plist.length > 1 && pi < plist.length - 1 && !$('#dTabs [data-pg="all"].on', view)) { showPage(pi + 1); const f = $(`.deptPage[data-page="${pi + 1}"] [data-tid]:not([readonly]):not([disabled])`, view); if (f) f.focus(); return; }
+        const all = $$('[data-tid]:not([readonly]):not([disabled])', view); const k = all.indexOf(from);
+        if (k >= 0 && k < all.length - 1) all[k + 1].focus(); else $('#repNote', view).focus();
+      });
       refresh();
-      view._collect = () => $$('[data-tid]', view).map(el => { const t = byId.get(Number(el.dataset.tid)); const rg = resolveRange(t, sex, ageDays); return { test_id: t.id, value: el.value, flag: computeFlag(t, el.value, rg), unit: t.unit, ref: refDisplay(t, rg) }; });
-      setTimeout(() => $('[data-tid]:not([readonly])', view)?.focus(), 50);
+      view._collect = () => $$('[data-tid]', view).map(el => { const t = byId.get(Number(el.dataset.tid)); const rg = resolveRange(t, sex, ageDays); return { test_id: t.id, value: el.value, flag: computeFlag(t, el.value, rg), unit: t.unit, ref: refDisplay(t, rg), note: $(`[data-note="${t.id}"]`, view)?.value || '' }; });
+      setTimeout(() => $('.deptPage.on [data-tid]:not([readonly])', view)?.focus(), 50);
     };
     actions(view, {
       back: () => go('lab-inbox'), receive: (b) => view._receive(b, !!b.dataset.print),
@@ -183,6 +230,13 @@ Pages['lab-work'] = {
       reopen: async () => { r = await API.post('/api/lab/results/' + r.id, { results: [], status: 'received' }); draw(); },
       report: async () => { if (!['approved', 'delivered'].includes(r.status)) { r = await API.post('/api/lab/results/' + r.id, { results: view._collect(), report_note: $('#repNote', view).value }); } previewDoc(labReportHTML(r), { size: 'A4', title: r.lab_code }); },
       receipt: () => previewDoc(labReceiptsHTML(r), { size: 'receipt', title: r.lab_code }),
+      sample: async () => {
+        // keep what was typed: save the draft results before redrawing
+        if (view._collect && !['approved', 'delivered'].includes(r.status)) await API.post('/api/lab/results/' + r.id, { results: view._collect(), report_note: $('#repNote', view)?.value });
+        r = await API.post('/api/lab/sample/' + r.id); toast('زمان گرفتن نمونه ثبت شد', 'good'); draw();
+        if (await confirmDlg('لیبل تیوب‌ها چاپ شود؟')) printDoc(tubeLabelsHTML(r), { size: 'label', title: r.lab_code });
+      },
+      labels: () => previewDoc(tubeLabelsHTML(r), { size: 'label', title: r.lab_code }),
       pay: async () => { const a = await promptDlg('دریافت باقی', { label: 'مبلغ', value: r.net - r.paid, type: 'number' }); if (a) { r = await API.post('/api/lab/pay/' + r.id, { amount: Number(a) }); draw(); } },
       deliver: async () => { r = await API.post('/api/lab/results/' + r.id, { results: [], status: 'delivered' }); draw(); }
     });
@@ -193,29 +247,35 @@ Pages['lab-work'] = {
 // ================================================================ walk-in patient (no doctor request)
 Pages['lab-walkin'] = {
   async render(view, params) {
-    const cat = await loadLabCatalog();
-    const sel = []; let patient = null; let sex = 'M';
+    const cat = await loadLabCatalog(true);
+    const sel = []; let dep = 'all';
+    const orderable = cat.tests.filter(t => t.active && (t.orderable || t.is_panel));
+    const deps = cat.departments.filter(d => orderable.some(t => t.department_id === d.id));
     view.innerHTML = `<div class="pageHead"><div><h1>پذیرش مریض بیرونی</h1><p>برای مریضی که نسخه داکتر کلینیک ندارد (یا از بیرون آمده). کد لابراتوار ساخته می‌شود.</p></div></div>
-      <div class="recGrid"><div class="card"><h2>${icon('user')} مریض</h2><div class="searchBox" style="margin-bottom:10px"><input id="wq" placeholder="جستجوی مریض قبلی…"></div><div id="wpt"></div>
-        <div class="recForm" id="wf"><label class="field c3"><span>نام <em>*</em></span><input name="full_name"></label><label class="field c3"><span>ولد</span><input name="father_name"></label>
-        <label class="field c2"><span>جنس</span><select name="sex">${opt([['M', 'مذکر'], ['F', 'مونث']], 'M')}</select></label><label class="field c2"><span>سن (سال)</span><input name="age_years" type="number"></label><label class="field c2"><span>تلفن</span><input name="phone" class="ltr"></label></div>
-        <label class="field" style="margin-top:10px"><span>داکتر ارجاع دهنده</span><select id="wdr">${opt(App.doctors.map(d => [d.id, doctorName(d)]), '', { empty: 'بیرونی / بدون داکتر' })}</select></label></div>
-      <div class="card"><h2>${icon('flask')} آزمایش‌ها</h2><div class="searchBox"><input id="wt" placeholder="کد، نام یا نمبر آزمایش…"></div>
-        <div class="testPick" style="margin-top:10px">${QUICK_TESTS.map(c => cat.tests.find(t => t.code === c && t.active)).filter(Boolean).map(t => `<button type="button" class="chip" data-tid="${t.id}">${esc(t.code)}</button>`).join('')}</div>
+      <div class="recGrid"><div class="card"><h2>${icon('user')} مریض</h2>${ptPickerHTML('wPt')}
+        <div class="secTitle" style="margin-top:12px">${icon('steth', 15)} داکتر ارجاع دهنده</div>${doctorPickerHTML('wDr', { placeholder: 'بیرونی / بدون داکتر' })}</div>
+      <div class="card"><h2>${icon('flask')} آزمایش‌ها <small class="muted">— مخفف آزمایش؛ موس را نگه دارید تا نام کامل دیده شود</small></h2><div class="searchBox"><input id="wt" placeholder="مخفف، نام یا نمبر آزمایش… (Enter = افزودن)" autocomplete="off"></div>
+        <div class="deptTabs" id="wDeps" style="position:static;margin-top:10px"><button data-dep="all" class="on">همه</button>${deps.map(d => `<button data-dep="${d.id}" title="${esc(d.name_fa || '')}">${esc(d.name || d.code)}</button>`).join('')}</div>
+        <div class="testChips" id="wChips"></div>
         <div class="selList" id="wl" style="margin-top:10px"></div><div class="totals"><div><span>جمع</span><b id="wsum">0</b></div></div>
         <button class="btn primary lg" data-act="create" style="margin-top:12px">${icon('next')} ثبت و رفتن به پذیرش و فیس</button></div></div>`;
-    const drawSel = () => { $('#wl', view).innerHTML = sel.map(id => { const t = cat.byId.get(id); return `<div class="selRow"><span class="codeTag">${esc(t.code)}</span><span class="nm">${esc(t.name)}</span><b>${money(t.price)}</b><button class="btn ghost icon" data-rm="${id}">${icon('x', 14)}</button></div>`; }).join(''); $('#wsum', view).textContent = money(sel.reduce((a, id) => a + cat.byId.get(id).price, 0)); $$('.testPick .chip', view).forEach(c => c.classList.toggle('on', sel.includes(Number(c.dataset.tid)))); };
-    const pickPt = (p) => { patient = p; $('#wpt', view).innerHTML = `<div class="ptHead" style="margin-bottom:8px">${patientHeadHTML(p)}<button class="btn sm" id="wclr">${icon('x', 13)}</button></div>`; $('#wf', view).classList.add('hidden'); $('#wclr', view).onclick = () => { patient = null; $('#wpt', view).innerHTML = ''; $('#wf', view).classList.remove('hidden'); }; };
-    patientSearch($('#wq', view), pickPt);
-    if (params.patient_id) pickPt(await API.one('patients', params.patient_id));
-    autocomplete($('#wt', view), { fetch: async (q) => { const s = q.toLowerCase(); return cat.tests.filter(t => t.active && t.orderable && (String(t.num_code) === q || t.code.toLowerCase().includes(s) || t.name.toLowerCase().includes(s))).slice(0, 20); },
-      render: (t) => `<span class="code">${t.num_code || ''} ${esc(t.code)}</span><span class="nm">${esc(t.name)}</span><span class="pr">${money(t.price)}</span>`, pick: (t) => { if (!sel.includes(t.id)) sel.push(t.id); $('#wt', view).value = ''; drawSel(); } });
-    view.addEventListener('click', (e) => { const c = e.target.closest('.testPick [data-tid]'); if (c) { const id = Number(c.dataset.tid); const i = sel.indexOf(id); i >= 0 ? sel.splice(i, 1) : sel.push(id); drawSel(); } const rm = e.target.closest('[data-rm]'); if (rm) { sel.splice(sel.indexOf(Number(rm.dataset.rm)), 1); drawSel(); } });
+    const pt = bindPtPicker(view, 'wPt'); const dr = bindDoctorPicker(view, 'wDr', { selected: '' });
+    const chips = () => {
+      const q = $('#wt', view).value.trim().toLowerCase();
+      $('#wChips', view).innerHTML = orderable.filter(t => (dep === 'all' || t.department_id === Number(dep)) && (!q || t.code.toLowerCase().includes(q) || t.name.toLowerCase().includes(q) || String(t.num_code) === q))
+        .map(t => `<button type="button" class="chip ${sel.includes(t.id) ? 'on' : ''}" data-tid="${t.id}" title="${esc(t.name)} — ${money(t.price)}">${esc(t.code)}</button>`).join('') || '<span class="muted">آزمایشی پیدا نشد</span>';
+    };
+    const drawSel = () => { $('#wl', view).innerHTML = sel.map(id => { const t = cat.byId.get(id); return `<div class="selRow"><span class="codeTag" title="${esc(t.name)}">${esc(t.code)}</span><span class="nm muted small">${t.is_panel ? 'پنل' : ''}</span><b>${money(t.price)}</b><button class="btn ghost icon" data-rm="${id}">${icon('x', 14)}</button></div>`; }).join(''); $('#wsum', view).textContent = money(sel.reduce((a, id) => a + cat.byId.get(id).price, 0)); chips(); };
+    const toggle = (id) => { const i = sel.indexOf(id); i >= 0 ? sel.splice(i, 1) : sel.push(id); drawSel(); };
+    if (params.patient_id) pt.set(await API.one('patients', params.patient_id));
+    $('#wDeps', view).onclick = (e) => { const b = e.target.closest('[data-dep]'); if (!b) return; dep = b.dataset.dep; $$('#wDeps button', view).forEach(x => x.classList.toggle('on', x === b)); chips(); };
+    $('#wt', view).addEventListener('input', chips);
+    $('#wt', view).addEventListener('keydown', (e) => { if (e.key !== 'Enter') return; e.preventDefault(); const q = e.target.value.trim().toLowerCase(); const t = orderable.find(x => x.code.toLowerCase() === q || String(x.num_code) === q) || orderable.find(x => x.code.toLowerCase().startsWith(q)); if (t) { if (!sel.includes(t.id)) toggle(t.id); e.target.value = ''; chips(); } });
+    view.addEventListener('click', (e) => { const c = e.target.closest('#wChips [data-tid]'); if (c) toggle(Number(c.dataset.tid)); const rm = e.target.closest('[data-rm]'); if (rm) toggle(Number(rm.dataset.rm)); });
     actions(view, {
       create: (b) => busy(b, async () => {
-        const f = formValues($('#wf', view));
-        if (!patient && !f.full_name.trim()) throw new Error('نام مریض را بنویسید');
-        const r = await API.post('/api/lab/walkin', { patient_id: patient?.id, patient: patient ? undefined : f, test_ids: sel, doctor_id: $('#wdr', view).value || null });
+        const who = pt.value(); if (!sel.length) throw new Error('آزمایش انتخاب نشده');
+        const r = await API.post('/api/lab/walkin', { ...who, test_ids: sel, doctor_id: dr.get() || null });
         openLabWork(r.id);
       })
     });
@@ -246,55 +306,177 @@ Pages['lab-list'] = {
 };
 
 // ================================================================ catalog & prices
+const AGE_UNITS = [['d', 'روز', 1], ['m', 'ماه', 30.4375], ['y', 'سال', 365.25]];
+function daysToAge(d) {
+  if (d === null || d === undefined || d === '') return ['', 'y'];
+  d = Number(d); if (!d) return [0, 'd'];
+  if (d % 365.25 < 1 || d % 365 === 0) return [Math.round(d / 365.25), 'y'];
+  if (d >= 28 && (d / 30.4375) % 1 < 0.05) return [Math.round(d / 30.4375), 'm'];
+  return [d, 'd'];
+}
+const ageToDays = (v, u) => v === '' || v === null || v === undefined ? null : Math.round(Number(v) * (AGE_UNITS.find(x => x[0] === u) || AGE_UNITS[2])[2]);
 Pages['lab-tests'] = {
   async render(view) {
     const cat = await loadLabCatalog(true);
     let dep = cat.departments[0]?.id;
-    view.innerHTML = `<div class="pageHead"><div><h1>لیست آزمایش‌ها و قیمت</h1><p>قیمت را مستقیم در جدول تغییر دهید (خودکار ذخیره می‌شود). ${cat.tests.length} آزمایش و پنل.</p></div><div class="toolbar"><button class="btn primary" data-act="new">${icon('plus')} آزمایش جدید</button></div></div>
+    const partOf = () => { const m = new Map(); cat.panel_items.forEach(p => { if (!m.has(p.test_id)) m.set(p.test_id, []); m.get(p.test_id).push(p.panel_id); }); return m; };
+    let parents = partOf();
+    view.innerHTML = `<div class="pageHead"><div><h1>لیست آزمایش‌ها و قیمت</h1><p>قیمت را مستقیم در جدول تغییر دهید. آزمایشی که «فعال» نباشد (مثلاً GFR یا Diff تکراری داخل CBC) در درخواست و نتایج دیده نمی‌شود. ${cat.tests.length} آزمایش و پنل.</p></div><div class="toolbar"><button class="btn primary" data-act="new">${icon('plus')} آزمایش جدید</button></div></div>
       <div class="split"><div class="card" style="padding:8px"><div class="deptList" id="dl"></div></div>
-      <div class="card"><div class="filterBar"><label class="field grow"><span>جستجو در همه</span><input id="tq"></label></div><div class="tableWrap"><table class="t"><thead><tr><th>نمبر</th><th>کد</th><th>نام</th><th>نمونه</th><th>واحد</th><th>محدوده نارمل</th><th>قیمت</th><th>فعال</th><th></th></tr></thead><tbody id="tb"></tbody></table></div></div></div>`;
+      <div class="card"><div class="filterBar"><label class="field grow"><span>جستجو در همه</span><input id="tq"></label><label class="field"><span>نمایش</span><select id="tShow">${opt([['all', 'همه (با اجزای پنل)'], ['main', 'فقط آزمایش‌ها و پنل‌ها'], ['inactive', 'فقط غیرفعال']], 'all')}</select></label></div>
+      <div class="tableWrap"><table class="t"><thead><tr><th>نمبر</th><th>کد</th><th>نام</th><th>نوع</th><th>نمونه</th><th>واحد</th><th>محدوده نارمل</th><th>قیمت</th><th>فعال</th><th></th></tr></thead><tbody id="tb"></tbody></table></div></div></div>`;
     const drawDeps = () => { $('#dl', view).innerHTML = cat.departments.map(d => `<button class="${d.id === dep ? 'on' : ''}" data-dep="${d.id}">${esc(d.name_fa || d.name)} <small>${cat.tests.filter(t => t.department_id === d.id).length}</small></button>`).join(''); };
+    const rangeText = (t) => { const rs = cat.ranges.get(t.id) || []; if (rs.length) { const r0 = rs.find(r => r.sex === 'A' && r.age_min_days == null && r.age_max_days == null) || rs[0]; return `${refDisplay(t, { low: r0.low, high: r0.high, text: r0.text })}${rs.length > 1 ? ` <small class="pill">+${rs.length - 1}</small>` : ''}`; } return esc(t.ref_text || (t.ref_low != null || t.ref_high != null ? `${t.ref_low ?? ''} - ${t.ref_high ?? ''}` : '')); };
     const drawTests = () => {
-      const q = $('#tq', view).value.trim().toLowerCase();
-      const list = cat.tests.filter(t => q ? (t.code.toLowerCase().includes(q) || t.name.toLowerCase().includes(q) || String(t.num_code) === q) : t.department_id === dep).filter(t => t.orderable || t.is_panel || q);
-      $('#tb', view).innerHTML = list.map(t => `<tr><td class="codeTag">${t.num_code || ''}</td><td class="codeTag">${esc(t.code)}</td><td class="en"><b>${esc(t.name)}</b>${t.is_panel ? ` <small class="pill info">پنل · ${(cat.components.get(t.id) || []).length}</small>` : ''}</td><td class="small en">${esc(t.sample || '')}</td><td class="en">${esc(t.unit || '')}</td><td class="en small">${esc(t.ref_text || (t.ref_low != null || t.ref_high != null ? `${t.ref_low ?? ''} - ${t.ref_high ?? ''}` : ''))}</td>
-        <td><input class="priceInput" type="number" data-price="${t.id}" value="${t.price}"></td><td><input type="checkbox" data-active="${t.id}" ${t.active ? 'checked' : ''}></td><td><button class="btn sm" data-act="edit" data-id="${t.id}">${icon('edit', 14)}</button></td></tr>`).join('') || emptyRow(9);
+      const q = $('#tq', view).value.trim().toLowerCase(), show = $('#tShow', view).value;
+      const list = cat.tests.filter(t => q ? (t.code.toLowerCase().includes(q) || t.name.toLowerCase().includes(q) || String(t.num_code) === q) : t.department_id === dep)
+        .filter(t => show === 'all' || (show === 'main' ? (t.orderable || t.is_panel) : !t.active));
+      $('#tb', view).innerHTML = list.map(t => { const par = (parents.get(t.id) || []).map(id => cat.byId.get(id)?.code).filter(Boolean);
+        return `<tr class="${t.active ? '' : 'muted'}"><td class="codeTag">${t.num_code || ''}</td><td class="codeTag">${esc(t.code)}</td><td class="en"><b>${esc(t.name)}</b>${t.formula ? ' <small class="pill">فرمول</small>' : ''}</td>
+        <td class="small">${t.is_panel ? `<span class="pill info">پنل · ${(cat.components.get(t.id) || []).length}</span>` : par.length ? `<span class="pill">جزء ${esc(par.join('، '))}</span>` : 'آزمایش'}</td><td class="small en">${esc(t.sample || '')}</td><td class="en">${esc(t.unit || '')}</td><td class="en small">${rangeText(t)}</td>
+        <td>${t.orderable || t.is_panel ? `<input class="priceInput" type="number" data-price="${t.id}" value="${t.price}">` : '<small class="muted">—</small>'}</td><td><input type="checkbox" data-active="${t.id}" ${t.active ? 'checked' : ''}></td><td><button class="btn sm" data-act="edit" data-id="${t.id}">${icon('edit', 14)}</button></td></tr>`; }).join('') || emptyRow(10);
     };
     $('#dl', view).onclick = (e) => { const b = e.target.closest('[data-dep]'); if (b) { dep = Number(b.dataset.dep); $('#tq', view).value = ''; drawDeps(); drawTests(); } };
-    $('#tq', view).addEventListener('input', debounce(drawTests, 200));
+    $('#tq', view).addEventListener('input', debounce(drawTests, 200)); $('#tShow', view).addEventListener('change', drawTests);
     $('#tb', view).addEventListener('change', async (e) => {
       const p = e.target.dataset.price, a = e.target.dataset.active;
       try {
         if (p) { await API.post('/api/lab/test/save', { id: Number(p), price: e.target.value }); cat.byId.get(Number(p)).price = Number(e.target.value); e.target.classList.add('changed'); toast('قیمت ذخیره شد', 'good'); }
-        if (a) { await API.post('/api/lab/test/save', { id: Number(a), active: e.target.checked }); cat.byId.get(Number(a)).active = e.target.checked ? 1 : 0; }
+        if (a) { await API.post('/api/lab/test/save', { id: Number(a), active: e.target.checked }); cat.byId.get(Number(a)).active = e.target.checked ? 1 : 0; toast(e.target.checked ? 'فعال شد' : 'غیرفعال شد — در درخواست و نتایج دیده نمی‌شود', 'good'); drawTests(); }
       } catch (err) { errToast(err); }
     });
-    const edit = (t) => {
+    const edit = async (t) => {
       t = t || { result_type: 'numeric', active: 1, orderable: 1, department_id: dep, price: 0 };
-      const ranges = (cat.ranges.get(t.id) || []);
-      const m = modal({ title: t.id ? 'ویرایش آزمایش ' + esc(t.code) : 'آزمایش جدید', size: 'wide', body: `<div class="formGrid" id="ltF">
-        <label class="field"><span>کد <em>*</em></span><input name="code" class="ltr" value="${esc(t.code || '')}"></label><label class="field span2"><span>نام <em>*</em></span><input name="name" class="en" value="${esc(t.name || '')}"></label>
-        <label class="field"><span>نمبر</span><input name="num_code" type="number" value="${esc(t.num_code || '')}"></label>
+      const items = await API.list('lab_items', { limit: 1000 }).catch(() => []);
+      const ranges = (cat.ranges.get(t.id) || []).map(r => ({ ...r }));
+      const comps = [...(cat.components.get(t.id) || [])];
+      const mats = (cat.test_items || []).filter(x => x.test_id === t.id).map(x => ({ item_id: x.item_id, qty: x.qty }));
+      const m = modal({ title: t.id ? 'ویرایش آزمایش ' + esc(t.code) : 'آزمایش جدید', size: 'xwide', body: `<div class="formGrid" id="ltF">
+        <label class="field"><span>کد (مخفف) <em>*</em></span><input name="code" class="ltr" value="${esc(t.code || '')}"></label><label class="field span2"><span>نام <em>*</em></span><input name="name" class="en" value="${esc(t.name || '')}"></label>
+        <label class="field"><span>نمبر</span><input name="num_code" type="number" value="${esc(t.num_code || '')}"></label><label class="field"><span>نام فارسی</span><input name="name_fa" value="${esc(t.name_fa || '')}"></label>
         <label class="field"><span>بخش</span><select name="department_id">${opt(cat.departments.map(d => [d.id, d.name_fa || d.name]), t.department_id)}</select></label>
         <label class="field"><span>نوع نتیجه</span><select name="result_type">${opt([['numeric', 'عددی'], ['option', 'انتخابی'], ['text', 'متن'], ['memo', 'متن طولانی']], t.result_type)}</select></label>
-        <label class="field"><span>نمونه</span><input name="sample" class="en" value="${esc(t.sample || '')}"></label><label class="field"><span>واحد</span><input name="unit" class="en" value="${esc(t.unit || '')}"></label>
-        <label class="field"><span>نارمل پایین</span><input name="ref_low" type="number" step="any" value="${esc(t.ref_low ?? '')}"></label><label class="field"><span>نارمل بالا</span><input name="ref_high" type="number" step="any" value="${esc(t.ref_high ?? '')}"></label>
-        <label class="field span2"><span>نارمل (متن)</span><input name="ref_text" class="en" value="${esc(t.ref_text || '')}"></label>
+        <label class="field"><span>نمونه</span><input name="sample" class="en" value="${esc(t.sample || '')}" list="ltSamples"></label><label class="field"><span>واحد</span><input name="unit" class="en" value="${esc(t.unit || '')}" list="ltUnits"></label>
+        <label class="field"><span>اعشار</span><input name="decimals" type="number" value="${esc(t.decimals ?? '')}"></label>
+        <label class="field"><span>نارمل پایین (عمومی)</span><input name="ref_low" type="number" step="any" value="${esc(t.ref_low ?? '')}"></label><label class="field"><span>نارمل بالا (عمومی)</span><input name="ref_high" type="number" step="any" value="${esc(t.ref_high ?? '')}"></label>
+        <label class="field span2"><span>نارمل (متن، مثلاً Negative یا 4.5 - 11)</span><input name="ref_text" class="en" value="${esc(t.ref_text || '')}"></label>
+        <label class="field"><span>بحرانی پایین</span><input name="critical_low" type="number" step="any" value="${esc(t.critical_low ?? '')}"></label><label class="field"><span>بحرانی بالا</span><input name="critical_high" type="number" step="any" value="${esc(t.critical_high ?? '')}"></label>
         <label class="field span2"><span>گزینه‌ها (برای انتخابی، با کامه)</span><input id="ltOpts" class="en" value="${esc(JSON.parse(t.options || '[]').join(', '))}"></label>
+        <label class="field span2"><span>فرمول (مثلاً {TCHOL}-{HDL}-{TG}/5)</span><input name="formula" class="ltr" value="${esc(t.formula || '')}"></label>
         <label class="field"><span>قیمت</span><input name="price" type="number" value="${esc(t.price)}"></label><label class="field"><span>قیمت تمام شد</span><input name="cost" type="number" value="${esc(t.cost || 0)}"></label>
-        <label class="check"><input type="checkbox" name="orderable" ${t.orderable ? 'checked' : ''}> قابل درخواست جداگانه</label><label class="check"><input type="checkbox" name="active" ${t.active ? 'checked' : ''}> فعال</label></div>
-        ${ranges.length ? `<div class="mini" style="margin-top:8px">این آزمایش ${ranges.length} محدوده نارمل مخصوص سن/جنس دارد که حفظ می‌شود.</div>` : ''}`,
+        <label class="check"><input type="checkbox" name="orderable" ${t.orderable ? 'checked' : ''}> قابل درخواست جداگانه</label><label class="check"><input type="checkbox" name="is_panel" id="ltPanel" ${t.is_panel ? 'checked' : ''}> پنل (چند آزمایش)</label><label class="check"><input type="checkbox" name="active" ${t.active ? 'checked' : ''}> فعال</label></div>
+        ${datalist('ltUnits', listSetting('lab_units'))}${datalist('ltSamples', ['Blood', 'Serum', 'Plasma', 'EDTA Blood', 'Citrate Blood', 'Urine', 'Stool', 'CSF', 'Swab', 'Semen', 'Sputum'])}
+        <div class="secTitle">${icon('list', 15)} محدوده نارمل به تفکیک جنس و سن <small class="muted">— اگر اینجا سطر باشد، به جای نارمل عمومی استفاده می‌شود (اطفال، نوزاد، زن / مرد)</small></div>
+        <table class="t rangeGrid" id="ltR"><thead><tr><th>جنس</th><th>از سن</th><th>تا سن</th><th>پایین</th><th>بالا</th><th>متن</th><th></th></tr></thead><tbody></tbody></table><button type="button" class="btn sm" id="ltRadd" style="margin-top:6px">${icon('plus', 13)} سطر محدوده</button>
+        <div id="ltCompBox" class="${t.is_panel ? '' : 'hidden'}"><div class="secTitle">${icon('flask', 15)} اجزای پنل <small class="muted">— آزمایش‌هایی که در نتیجه این پنل نوشته می‌شود</small></div><input id="ltCq" placeholder="جستجو…" style="margin-bottom:6px"><div class="compList" id="ltComp"></div></div>
+        <div class="secTitle">${icon('box', 15)} مواد مصرفی برای هر بار این آزمایش <small class="muted">— هنگام ثبت آزمایش خودکار از موجودی مواد لابراتوار کم می‌شود</small></div>
+        <table class="t" id="ltM"><thead><tr><th>مواد</th><th>مقدار</th><th></th></tr></thead><tbody></tbody></table><button type="button" class="btn sm" id="ltMadd" style="margin-top:6px" ${items.length ? '' : 'disabled title="اول در صفحه موجودی مواد لابراتوار مواد اضافه کنید"'}>${icon('plus', 13)} مواد</button>`,
         foot: `<button class="btn primary" id="lt_ok">ذخیره</button><button class="btn" data-x>انصراف</button>` });
+      const drawR = () => { $('#ltR tbody', m.el).innerHTML = ranges.map((r, i) => { const [a1, u1] = daysToAge(r.age_min_days), [a2, u2] = daysToAge(r.age_max_days); const un = (u) => opt(AGE_UNITS.map(x => [x[0], x[1]]), u);
+        return `<tr data-ri="${i}"><td><select data-k="sex">${opt([['A', 'همه'], ['M', 'مرد'], ['F', 'زن']], r.sex || 'A')}</select></td><td class="nowrap"><input data-k="a1" type="number" step="any" value="${esc(a1)}" style="width:64px"><select data-k="u1">${un(u1)}</select></td><td class="nowrap"><input data-k="a2" type="number" step="any" value="${esc(a2)}" style="width:64px"><select data-k="u2">${un(u2)}</select></td>
+          <td><input data-k="low" type="number" step="any" value="${esc(r.low ?? '')}" style="width:80px"></td><td><input data-k="high" type="number" step="any" value="${esc(r.high ?? '')}" style="width:80px"></td><td><input data-k="text" class="en" value="${esc(r.text || '')}"></td><td><button type="button" class="btn ghost icon" data-rr="${i}">${icon('x', 13)}</button></td></tr>`; }).join('') || emptyRow(7, 'سطری نیست — نارمل عمومی بالا استفاده می‌شود'); };
+      const readR = () => $$('#ltR tr[data-ri]', m.el).forEach(tr => { const r = ranges[Number(tr.dataset.ri)]; const g = (k) => $(`[data-k="${k}"]`, tr).value; Object.assign(r, { sex: g('sex'), age_min_days: ageToDays(g('a1'), g('u1')), age_max_days: ageToDays(g('a2'), g('u2')), low: g('low'), high: g('high'), text: g('text') }); });
+      $('#ltRadd', m.el).onclick = () => { readR(); ranges.push({ sex: 'A', age_min_days: null, age_max_days: null, low: '', high: '', text: '' }); drawR(); };
+      $('#ltR', m.el).onclick = (e) => { const b = e.target.closest('[data-rr]'); if (b) { readR(); ranges.splice(Number(b.dataset.rr), 1); drawR(); } };
+      const drawC = () => { const q = ($('#ltCq', m.el).value || '').toLowerCase(); const pool = cat.tests.filter(x => x.id !== t.id && !x.is_panel).sort((a, b) => (b.department_id === Number($('[name="department_id"]', m.el).value)) - (a.department_id === Number($('[name="department_id"]', m.el).value)));
+        $('#ltComp', m.el).innerHTML = [...comps.map(id => cat.byId.get(id)).filter(Boolean), ...pool.filter(x => !comps.includes(x.id))].filter(x => !q || comps.includes(x.id) || x.code.toLowerCase().includes(q) || x.name.toLowerCase().includes(q)).slice(0, 300)
+          .map(x => `<label class="${x.active ? '' : 'muted'}"><input type="checkbox" data-comp="${x.id}" ${comps.includes(x.id) ? 'checked' : ''}> <b>${esc(x.code)}</b> ${esc(x.name)}${x.active ? '' : ' (غیرفعال)'}</label>`).join(''); };
+      $('#ltComp', m.el).onchange = (e) => { const id = Number(e.target.dataset.comp); if (!id) return; const i = comps.indexOf(id); if (e.target.checked && i < 0) comps.push(id); if (!e.target.checked && i >= 0) comps.splice(i, 1); };
+      $('#ltCq', m.el).addEventListener('input', debounce(drawC, 150));
+      $('#ltPanel', m.el).onchange = (e) => { $('#ltCompBox', m.el).classList.toggle('hidden', !e.target.checked); drawC(); };
+      const drawM = () => { $('#ltM tbody', m.el).innerHTML = mats.map((x, i) => `<tr data-mi="${i}"><td><select data-k="item">${opt(items.map(it => [it.id, `${it.name}${it.unit ? ' (' + it.unit + ')' : ''}`]), x.item_id)}</select></td><td><input data-k="qty" type="number" step="any" value="${esc(x.qty)}" style="width:90px"></td><td><button type="button" class="btn ghost icon" data-rm2="${i}">${icon('x', 13)}</button></td></tr>`).join('') || emptyRow(3, 'مواد تعریف نشده'); };
+      const readM = () => $$('#ltM tr[data-mi]', m.el).forEach(tr => { const x = mats[Number(tr.dataset.mi)]; x.item_id = Number($('[data-k="item"]', tr).value); x.qty = $('[data-k="qty"]', tr).value; });
+      $('#ltMadd', m.el).onclick = () => { readM(); mats.push({ item_id: items[0]?.id, qty: 1 }); drawM(); };
+      $('#ltM', m.el).onclick = (e) => { const b = e.target.closest('[data-rm2]'); if (b) { readM(); mats.splice(Number(b.dataset.rm2), 1); drawM(); } };
+      drawR(); drawC(); drawM();
       $('[data-x]', m.el).onclick = m.close;
       $('#lt_ok', m.el).onclick = () => busy($('#lt_ok', m.el), async () => {
+        readR(); readM();
         const v = formValues($('#ltF', m.el)); if (t.id) v.id = t.id;
-        const o = $('#ltOpts', m.el).value.split(',').map(s => s.trim()).filter(Boolean); v.options = o.length ? JSON.stringify(o) : '';
-        await API.post('/api/lab/test/save', v); toast('ذخیره شد', 'good'); m.close(); Object.assign(cat, await loadLabCatalog(true)); drawDeps(); drawTests();
+        const o = $('#ltOpts', m.el).value.split(',').map(x => x.trim()).filter(Boolean); v.options = o.length ? JSON.stringify(o) : '';
+        v.ranges = ranges.filter(r => r.low !== '' || r.high !== '' || String(r.text || '').trim());
+        if (v.is_panel) v.components = comps;
+        v.items = mats.filter(x => x.item_id && Number(x.qty) > 0);
+        await API.post('/api/lab/test/save', v); toast('ذخیره شد — محدوده‌های نارمل جدید در نتایج و راپور اعمال می‌شود', 'good'); m.close();
+        Object.assign(cat, await loadLabCatalog(true)); parents = partOf(); drawDeps(); drawTests();
       }).catch(errToast);
     };
     actions(view, { new: () => edit(), edit: (b) => edit(cat.byId.get(Number(b.dataset.id))) });
     drawDeps(); drawTests();
   }
+};
+
+// ================================================================ laboratory materials (reagents, tubes, strips …)
+Pages['lab-items'] = {
+  async render(view) {
+    const [mf] = currentMonthRange();
+    view.innerHTML = `<div class="pageHead"><div><h1>موجودی مواد لابراتوار</h1><p>ری‌ایجنت، تیوب، استریپ و کیت‌ها. هر آزمایشی که مواد برایش تعریف شده باشد، هنگام ثبت در پذیرش خودکار از موجودی کم می‌شود؛ لغو آزمایش آن را برمی‌گرداند.</p></div>
+      <div class="toolbar"><button class="btn primary" data-act="new">${icon('plus')} مواد جدید</button><button class="btn" data-act="usage">${icon('chart')} گزارش مصرف</button></div></div>
+      <div class="grid g4" id="liK"></div>
+      <div class="card" style="margin-top:14px"><div class="filterBar"><label class="field grow"><span>جستجو</span><input id="liQ"></label><label class="check" style="align-self:end"><input type="checkbox" id="liLow"> فقط کمبودها</label></div>
+      <div class="tableWrap"><table class="t"><thead><tr><th>نام</th><th>واحد</th><th>موجودی</th><th>حد سفارش</th><th>قیمت واحد</th><th>ارزش</th><th>انقضا</th><th>فروشنده</th><th></th></tr></thead><tbody id="liB"></tbody></table></div></div>`;
+    let rows = [];
+    const load = async () => {
+      rows = await API.list('lab_items', { limit: 2000 });
+      const low = rows.filter(r => r.active && r.reorder_level > 0 && r.stock <= r.reorder_level);
+      const soon = rows.filter(r => r.expiry && r.expiry <= isoDate(addDays(new Date(), 60)));
+      $('#liK', view).innerHTML = kpi('اقلام', rows.filter(r => r.active).length, { ic: 'box' }) + kpi('کمبود', low.length, { ic: 'bell', cls: low.length ? 'bad' : 'good' }) + kpi('نزدیک به انقضا (۶۰ روز)', soon.length, { ic: 'calendar', cls: soon.length ? 'warn' : '' }) + kpi('ارزش موجودی', money(rows.reduce((a, r) => a + Math.max(0, r.stock) * r.cost, 0)), { ic: 'money', cls: 'violet' });
+      draw();
+    };
+    const draw = () => {
+      const q = $('#liQ', view).value.trim().toLowerCase(), lowOnly = $('#liLow', view).checked;
+      const list = rows.filter(r => (!q || [r.name, r.supplier, r.notes].some(x => String(x || '').toLowerCase().includes(q))) && (!lowOnly || (r.reorder_level > 0 && r.stock <= r.reorder_level)));
+      $('#liB', view).innerHTML = list.map(r => `<tr class="${r.active ? '' : 'muted'} ${r.reorder_level > 0 && r.stock <= r.reorder_level ? 'short' : ''}"><td><b>${esc(r.name)}</b></td><td>${esc(r.unit || '')}</td><td class="${r.stock <= 0 ? 'neg' : ''}"><b>${fmtNum(r.stock)}</b></td><td>${fmtNum(r.reorder_level)}</td><td>${money(r.cost)}</td><td>${money(Math.max(0, r.stock) * r.cost)}</td>
+        <td class="${r.expiry && r.expiry <= today() ? 'neg' : ''}">${r.expiry ? fmtDate(r.expiry) : ''}</td><td>${esc(r.supplier || '')}</td>
+        <td class="nowrap"><button class="btn sm success" data-act="in" data-id="${r.id}">${icon('plus', 13)} ورود</button> <button class="btn sm" data-act="out" data-id="${r.id}">مصرف / تعدیل</button> <button class="btn sm" data-act="hist" data-id="${r.id}">${icon('list', 13)}</button> <button class="btn sm" data-act="edit" data-id="${r.id}">${icon('edit', 13)}</button></td></tr>`).join('') || emptyRow(9, 'موادی ثبت نشده');
+    };
+    $('#liQ', view).addEventListener('input', debounce(draw, 150)); $('#liLow', view).addEventListener('change', draw);
+    const editItem = (it) => {
+      it = it || { active: 1, stock: 0, reorder_level: 0, cost: 0 };
+      const m = modal({ title: it.id ? 'ویرایش مواد' : 'مواد جدید', body: `<div class="formGrid" id="liF"><label class="field span2"><span>نام <em>*</em></span><input name="name" value="${esc(it.name || '')}"></label><label class="field"><span>واحد (ml، test، عدد…)</span><input name="unit" value="${esc(it.unit || '')}"></label>
+        <label class="field"><span>حد سفارش (هشدار کمبود)</span><input name="reorder_level" type="number" step="any" value="${esc(it.reorder_level)}"></label><label class="field"><span>قیمت واحد</span><input name="cost" type="number" step="any" value="${esc(it.cost)}"></label>
+        <label class="field"><span>تاریخ انقضا</span>${dateInput('expiry', it.expiry)}</label><label class="field"><span>فروشنده / کمپنی</span><input name="supplier" value="${esc(it.supplier || '')}"></label>
+        ${it.id ? '' : '<label class="field"><span>موجودی اول</span><input id="liStart" type="number" step="any" value="0"></label>'}
+        <label class="check"><input type="checkbox" name="active" ${it.active ? 'checked' : ''}> فعال</label><label class="field full"><span>یادداشت</span><input name="notes" value="${esc(it.notes || '')}"></label></div>`,
+        foot: `<button class="btn primary" id="li_ok">ذخیره</button><button class="btn" data-x>انصراف</button>` });
+      $('[data-x]', m.el).onclick = m.close;
+      $('#li_ok', m.el).onclick = () => busy($('#li_ok', m.el), async () => {
+        const v = formValues($('#liF', m.el)); if (it.id) v.id = it.id; if (!v.name) throw new Error('نام الزامی است');
+        const id = await API.save('lab_items', v);
+        const st0 = Number($('#liStart', m.el)?.value || 0); if (!it.id && st0) await API.post('/api/lab/items/move', { item_id: id, qty: st0, kind: 'in', note: 'موجودی اول' });
+        toast('ذخیره شد', 'good'); m.close(); load();
+      }).catch(errToast);
+    };
+    const move = (it, kind) => {
+      const m = modal({ title: (kind === 'in' ? 'ورود مواد — ' : 'مصرف / تعدیل — ') + esc(it.name), body: `<div class="formGrid" id="mvF">
+        ${kind === 'in' ? '' : `<label class="field"><span>نوع</span><select name="kind">${opt([['use', 'مصرف دستی'], ['expired', 'انقضا / ضایع'], ['adjust', 'تعدیل (شمارش)']], 'use')}</select></label>`}
+        <label class="field"><span>مقدار ${kind === 'in' ? '' : '(تعدیل: + یا −)'}</span><input name="qty" type="number" step="any"></label><label class="field"><span>تاریخ</span>${dateInput('date', today())}</label>
+        ${kind === 'in' ? `<label class="field"><span>قیمت واحد</span><input name="unit_cost" type="number" step="any" value="${esc(it.cost)}"></label><label class="field"><span>تاریخ انقضا</span>${dateInput('expiry', it.expiry)}</label>` : ''}
+        <label class="field full"><span>یادداشت</span><input name="note"></label></div><div class="mini">موجودی فعلی: <b>${fmtNum(it.stock)} ${esc(it.unit || '')}</b></div>`,
+        foot: `<button class="btn primary" id="mv_ok">ثبت</button><button class="btn" data-x>انصراف</button>` });
+      $('[data-x]', m.el).onclick = m.close;
+      $('#mv_ok', m.el).onclick = () => busy($('#mv_ok', m.el), async () => { const v = formValues($('#mvF', m.el)); const r2x = await API.post('/api/lab/items/move', { item_id: it.id, kind: v.kind || kind, ...v }); toast(`ثبت شد — موجودی ${fmtNum(r2x.stock)}`, 'good'); m.close(); load(); }).catch(errToast);
+    };
+    const KIND = { in: ['ورود', 'good'], use: ['مصرف', ''], return: ['برگشت', 'info'], adjust: ['تعدیل', 'warn'], expired: ['انقضا', 'bad'] };
+    actions(view, {
+      new: () => editItem(), edit: (b) => editItem(rows.find(r => r.id === Number(b.dataset.id))),
+      in: (b) => move(rows.find(r => r.id === Number(b.dataset.id)), 'in'), out: (b) => move(rows.find(r => r.id === Number(b.dataset.id)), 'out'),
+      hist: async (b) => {
+        const it = await API.get('/api/lab/items/' + b.dataset.id);
+        modal({ title: 'گردش ' + esc(it.name), size: 'wide', body: `${it.tests.length ? `<div class="mini" style="margin-bottom:8px">مصرف در آزمایش‌ها: ${it.tests.map(t => `<b class="en">${esc(t.code)}</b> (${fmtNum(t.qty)})`).join('، ')}</div>` : ''}
+          <div class="tableWrap" style="max-height:60vh"><table class="t"><thead><tr><th>تاریخ</th><th>نوع</th><th>مقدار</th><th>مرجع</th><th>کاربر</th><th>یادداشت</th></tr></thead><tbody>${it.moves.map(x => `<tr><td>${fmtDate(x.date)} <small class="muted ltr">${fmtTime(x.at)}</small></td><td>${statusPill(KIND, x.kind)}</td><td class="${x.qty < 0 ? 'neg' : 'pos'}">${fmtNum(x.qty)}</td><td class="codeTag">${esc(x.ref_type === 'lab_request' ? x.note : '')}</td><td>${esc(x.user_name || '')}</td><td>${esc(x.ref_type ? '' : x.note || '')}</td></tr>`).join('') || emptyRow(6)}</tbody></table></div>` });
+      },
+      usage: async () => {
+        const m = modal({ title: 'گزارش مصرف مواد', size: 'wide', body: `<div class="filterBar">${dateInput('from', mf, 'id="u_from" style="width:120px"')}${dateInput('to', today(), 'id="u_to" style="width:120px"')}</div><div id="uB"></div>`, foot: `<button class="btn" id="uPr">${icon('print')} چاپ</button><button class="btn" data-x>بستن</button>` });
+        const run = async () => { const r = await API.get('/api/lab/items-usage', { from: dateOf($('#u_from', m.el)), to: dateOf($('#u_to', m.el)) }); $('#uB', m.el).innerHTML = `<table class="t rt rtl"><thead><tr><th>مواد</th><th>مصرف</th><th>ورود</th><th>موجودی</th><th>ارزش مصرف</th></tr></thead><tbody>${r.map(x => `<tr><td>${esc(x.name)} <small class="muted">${esc(x.unit || '')}</small></td><td>${fmtNum(x.used)}</td><td>${fmtNum(x.received)}</td><td>${fmtNum(x.stock)}</td><td>${money(x.used * x.cost)}</td></tr>`).join('') || emptyRow(5)}</tbody></table>`; };
+        $$('#u_from, #u_to', m.el).forEach(el => el.addEventListener('change', run)); await run();
+        $('[data-x]', m.el).onclick = m.close;
+        $('#uPr', m.el).onclick = () => previewDoc(reportDocHTML('گزارش مصرف مواد لابراتوار', `<p>${fmtDate(dateOf($('#u_from', m.el)))} تا ${fmtDate(dateOf($('#u_to', m.el)))}</p>${$('#uB', m.el).innerHTML}`), { title: 'مصرف مواد' });
+      }
+    });
+    await load(); this._load = debounce(load, 500);
+  },
+  onEvent(m) { if (this._load && /^(lab|labitem)/.test(m.type)) this._load(); }
 };
 
 // ================================================================ lab sales

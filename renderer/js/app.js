@@ -22,13 +22,18 @@ const NAV = [
   ['daily', 'حسابات روزانه', 'calendar', ['stock'], 'stock'],
   ['monthly', 'گزارش ماهانه و مفاد', 'trend', ['stock'], 'stock'],
   ['med-sales', 'فروش و مفاد هر دوا', 'chart', ['stock', 'pharmacy'], 'stock'],
+  ['reorder', 'سفارش خرید (کمبودها)', 'cart', ['stock', 'pharmacy'], 'stock'],
   ['import', 'ورود اطلاعات از اکسل', 'excel', ['stock'], 'stock'],
 
   ['reception', 'پذیرش و نوبت', 'ticket', ['reception'], 'reception'],
   ['visits', 'صف امروز و لیست پذیرش', 'list', ['reception'], 'reception'],
   ['reservations', 'وقت‌دهی / رزرو', 'calendar', ['reception'], 'reception'],
   ['patients', 'مریضان', 'users', ['reception', 'doctor'], 'reception'],
-  ['rc-cash', 'صندوق پذیرش', 'money', ['reception'], 'reception'],
+  ['cashier', 'صندوق مرکزی (همه پرداخت‌ها)', 'cash', ['reception'], 'reception'],
+  ['rc-lab', 'پذیرش لابراتوار', 'flask', ['reception'], 'reception'],
+  ['ipd', 'بستر و تخت‌ها', 'bed', ['reception', 'doctor'], 'reception'],
+  ['rc-cash', 'حسابات روز و تحویل صندوق', 'money', ['reception'], 'reception'],
+  ['qdisplay', 'صفحه نمایش نوبت (TV)', 'tv', ['reception', 'doctor'], 'reception'],
 
   ['dr-queue', 'صف مریضان', 'list', ['doctor'], 'doctor'],
   ['encounter', 'ویزیت، نسخه و آزمایش', 'rx', ['doctor'], 'doctor'],
@@ -45,6 +50,7 @@ const NAV = [
   ['lab-walkin', 'پذیرش مریض بیرونی', 'plus', ['lab'], 'lab'],
   ['lab-list', 'آزمایش‌ها و نتایج', 'list', ['lab'], 'lab'],
   ['lab-tests', 'لیست آزمایش‌ها و قیمت', 'flask', ['lab'], 'lab'],
+  ['lab-items', 'موجودی مواد لابراتوار', 'box', ['lab', 'stock'], 'lab'],
   ['lab-sales', 'فروش لابراتوار', 'chart', ['lab'], 'lab'],
 
   ['local', 'تنظیمات این کمپیوتر', 'settings', ALL_ROLES, 'local']
@@ -60,19 +66,16 @@ function detectStation() {
   const s = q || (window.native && window.native.station) || '';
   App.station = STATIONS[s] ? s : '';
   const st = STATIONS[App.station] || STATIONS.admin;
-  const mix = (hex, to, t) => '#' + [1, 3, 5].map(i => { const a = parseInt(hex.substr(i, 2), 16), b = parseInt(to.substr(i, 2), 16); return Math.round(a + (b - a) * t).toString(16).padStart(2, '0'); }).join('');
-  const root = document.documentElement.style;
-  root.setProperty('--brand', st.color); root.setProperty('--brand-2', st.color2);
-  root.setProperty('--brand-soft', mix(st.color2, '#ffffff', .9)); root.setProperty('--brand-ink', mix(st.color, '#000000', .25)); root.setProperty('--brand-dark', mix(st.color, '#000000', .3));
+  Theme.apply();
   $('#loginStation').innerHTML = App.station ? `${icon(st.icon, 14)} ایستگاه: ${esc(st.name)}` : `${icon('network', 14)} مرورگر شبکه`;
   document.title = (App.station ? st.name + ' — ' : '') + 'سیستم جامع کلینیک';
 }
 
 async function loadBootstrap() {
   const b = await API.get('/api/bootstrap');
-  App.settings = b.settings; App.doctors = b.doctors; App.services = b.services; App.server = b.server;
+  App.settings = b.settings; App.doctors = b.doctors; App.services = b.services; App.server = b.server; App.departments = b.departments || [];
   if (b.user) App.user = { ...App.user, ...b.user };
-  applyBranding();
+  applyBranding(); Theme.apply();
   return b;
 }
 function applyBranding() {
@@ -179,6 +182,9 @@ function onLiveEvent(m) {
     case 'stock:low':
       if (['stock', 'admin'].includes(role) && Date.now() - (lowStockSeen.get(d.id) || 0) > 3600000) { lowStockSeen.set(d.id, Date.now()); toast(`موجودی «${d.name}» کم است (${d.stock})`, 'bad'); }
       break;
+    case 'sale:paid': if (role === 'pharmacy') notify('پول نسخه در صندوق پرداخت شد', `${d.sale_code}${d.rx_code ? ' / ' + d.rx_code : ''} — ${d.patient_name || ''} · دوا را تحویل دهید`); break;
+    case 'lab:paid': if (role === 'lab') notify('فیس آزمایش در صندوق پرداخت شد', d.lab_code); break;
+    case 'labitem:low': if (['lab', 'stock', 'admin'].includes(role) && Date.now() - (lowStockSeen.get('l' + d.id) || 0) > 3600000) { lowStockSeen.set('l' + d.id, Date.now()); toast(`مواد لابراتوار «${d.name}» کم است (${d.stock})`, 'bad'); } break;
     case 'settings:update': case 'setup:update': loadBootstrap().catch(() => { }); break;
     case 'reload': setTimeout(() => location.reload(), 800); return;
   }
@@ -212,6 +218,7 @@ const refreshCounts = debounce(async () => {
       if (req && role !== 'admin') items.push({ cls: 'warn', ic: '⚗', title: `${req} درخواست آزمایش جدید`, text: 'منتظر پذیرش', go: () => go('lab-inbox') });
     }
     if (isRole('reception')) {
+      try { const pend = await API.get('/api/cashier/pending'); const n2 = pend.sales.filter(x => x.balance > 0.001).length + pend.labs.length + pend.visits.filter(v => v.balance > 0.001).length + pend.admissions.filter(a => a.status === 'admitted' || a.balance > 0.001).length; set('cashier', n2); } catch (_) { }
       const refunds = await API.list('visits', { 'lt.balance': -0.001, 'ne.status': 'cancelled', limit: 50 });
       set('visits', refunds.length);
       refunds.forEach(v => items.push({ cls: 'warn', ic: '؋', title: `بازپرداخت تخفیف داکتر: ${v.full_name}`, text: `${money(-v.balance)} ${currency()} — ${v.visit_no}`, go: () => go('visits') }));
@@ -286,6 +293,7 @@ function tickClock() { const d = new Date(); $('#clock').textContent = `${WEEKDA
   $('#loginForm').addEventListener('submit', doLogin);
   $('#logoutBtn').onclick = logout;
   $('#alertsBtn').onclick = showAlerts;
+  $('#themeBtn').onclick = () => Theme.cycle();
   $('#userChip').onclick = () => changePasswordDlg(false);
   $('#globalSearch').addEventListener('input', globalSearch);
   $('#globalSearch').addEventListener('blur', () => setTimeout(() => $('#globalResults').classList.add('hidden'), 200));

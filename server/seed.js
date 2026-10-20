@@ -41,8 +41,22 @@ const DEFAULT_SETTINGS = {
   rx_duration_units: LIST('روز', 'هفته', 'ماه'),
   expense_categories: LIST('معاش کارمندان', 'بل برق', 'انترنت / وایفای', 'کرایه', 'قرطاسیه', 'نظافت', 'مواد سونوگرافی', 'مواد مصرفی', 'ترانسپورت', 'ترمیمات', 'شخصی', 'برگشتی', 'سایر'),
   medicine_categories: LIST('انتی بیوتیک', 'مسکن و ضد التهاب', 'ویتامین و مکمل', 'گوارشی', 'تنفسی و حساسیت', 'قلبی و فشار خون', 'دیابت', 'زنانه و ولادی', 'اطفال', 'سیروم و پیچکاری', 'پوستی', 'چشم و گوش', 'عصبی', 'سایر'),
-  medicine_units: LIST('عدد', 'تابلیت', 'کپسول', 'بوتل', 'ورق', 'قطی', 'امپول', 'ویال', 'تیوب', 'ساشه', 'بسته')
+  medicine_units: LIST('عدد', 'تابلیت', 'کپسول', 'بوتل', 'ورق', 'قطی', 'امپول', 'ویال', 'تیوب', 'ساشه', 'بسته'),
+  // v2
+  cashier_mode: 'central',                          // central = all money (doctor fees, laboratory, pharmacy, beds) is received at reception | mixed = sections may also receive
+  admission_prefix: 'IP-',
+  doctor_work_types: LIST('متخصص', 'داکتر عمومی', 'سونولوژیست', 'جراح', 'قابله', 'نرس', 'تکنالوژست', 'مشاور'),
+  lab_units: LIST('عدد', 'ml', 'تست', 'کیت', 'بسته', 'بوتل', 'قطی', 'جوره'),
+  cdss_enabled: '1',                                // allergy / interaction / duplicate warnings for doctors
+  dup_lab_days: '7',
+  backup_extra_dir: '',                             // second backup folder (USB / network drive)
+  // laboratory report print settings
+  lab_font: 'Vazirmatn', lab_font_size: '12', lab_font_weight: 'normal', lab_line_height: '1.5', lab_row_padding: '3',
+  lab_result_align: 'left', lab_grid: 'grid', lab_section_align: 'left', lab_patient_lang: 'fa', lab_show_print_time: '0', lab_show_signature: '1',
+  // prescription print settings
+  rx_font: 'Vazirmatn', rx_font_size: '13.5', rx_font_weight: 'normal', rx_line_height: '1.6'
 };
+const DEPARTMENTS = ['اطفال', 'نسائی و ولادی', 'داخله', 'سونوگرافی', 'عمومی'];
 
 // clinic doctors as printed on the letterhead
 const DOCTORS = [
@@ -105,6 +119,19 @@ function ensureDefaults(db) {
 
     if (!db.scalar('SELECT COUNT(*) FROM doctors')) {
       for (const d of DOCTORS) db.insert('doctors', d);
+    }
+    if (!db.scalar('SELECT COUNT(*) FROM medical_departments')) {
+      DEPARTMENTS.forEach((name, i) => db.insert('medical_departments', { name, sort: i + 1 }));
+      const dep = (n) => db.scalar('SELECT id FROM medical_departments WHERE name=?', [n]);
+      for (const d of db.all('SELECT * FROM doctors WHERE department_id IS NULL')) {
+        const t = `${d.specialty || ''} ${d.header_lines || ''}`;
+        const id = /نسائی|ولادی/.test(t) ? dep('نسائی و ولادی') : /اطفال/.test(t) ? dep('اطفال') : /داخله/.test(t) ? dep('داخله') : null;
+        db.update('doctors', d.id, { department_id: id, work_type: d.work_type || 'متخصص' });
+      }
+    }
+    if (!db.scalar('SELECT COUNT(*) FROM wards')) {
+      const w = db.insert('wards', { name: 'اطاق بستر', daily_rate: 1000, sort: 1 });
+      for (let i = 1; i <= 4; i++) db.insert('beds', { ward_id: w, name: 'تخت ' + i, sort: i });
     }
     if (!db.scalar('SELECT COUNT(*) FROM services')) {
       SERVICES.forEach(([code, name, fee, needs, color], i) => db.insert('services', { code, name, fee, needs_doctor: needs, color, sort: i + 1 }));

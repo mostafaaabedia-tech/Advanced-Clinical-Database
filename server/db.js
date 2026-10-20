@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const initSqlJs = require('sql.js/dist/sql-wasm.js');
-const { SCHEMA, SCHEMA_VERSION } = require('./schema');
+const { TABLES, VIEWS, SCHEMA_VERSION } = require('./schema');
 const seed = require('./seed');
 
 function hashPassword(password, salt) {
@@ -50,8 +50,9 @@ class ClinicDatabase {
   }
   prepareDb() {
     this.db.exec('PRAGMA foreign_keys = ON;');
-    this.db.exec(SCHEMA);
+    this.db.exec(TABLES);
     this.migrate();
+    this.db.exec(VIEWS);
     seed.ensureDefaults(this);
   }
 
@@ -125,8 +126,19 @@ class ClinicDatabase {
 
   migrate() {
     const v = Number(this.scalarSafe("SELECT value FROM settings WHERE key='schema_version'") || 0);
+    // columns added after the first release (safe to run on every start)
+    const add = (t, c, d) => this.addColumn(t, c, d);
+    add('doctors', 'department_id', 'INTEGER'); add('doctors', 'work_type', 'TEXT'); add('doctors', 'room', 'TEXT');
+    add('patients', 'emergency_name', 'TEXT'); add('patients', 'emergency_phone', 'TEXT'); add('patients', 'insurance', 'TEXT'); add('patients', 'insurance_no', 'TEXT');
+    add('visits', 'height', 'REAL');
+    add('encounters', 'diagnosis_code', 'TEXT');
+    add('visit_payments', 'station', 'TEXT'); add('lab_payments', 'station', 'TEXT');
+    add('lab_requests', 'sampled_at', 'TEXT'); add('lab_requests', 'sampled_by', 'INTEGER');
     if (v < SCHEMA_VERSION) {
-      // future migrations go here (if v < 2 …)
+      if (v >= 1 && v < 2) {
+        // pharmacy payments were a single number before v2 → keep them as payment rows for the cash reports
+        this.db.run("INSERT INTO sale_payments(sale_id, amount, method, note, station, created_by, created_at) SELECT id, paid, pay_method, 'پرداخت هنگام فروش', 'pharmacy', created_by, created_at FROM sales WHERE paid > 0 AND id NOT IN (SELECT sale_id FROM sale_payments)");
+      }
       this.db.run("INSERT OR REPLACE INTO settings(key,value) VALUES('schema_version',?)", [String(SCHEMA_VERSION)]);
     }
   }

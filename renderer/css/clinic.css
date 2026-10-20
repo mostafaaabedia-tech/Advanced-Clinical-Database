@@ -188,13 +188,13 @@ table.posT .medCell { direction: ltr; text-align: left; }
 .rxClin b { color: #0b3a63; }
 .rxSym { font-family: 'Times New Roman', serif; font-size: 34px; font-weight: 700; font-style: italic; color: #0b3a63; direction: ltr; text-align: left; margin: 3mm 0 0; line-height: 1; }
 .rxSym sub { font-size: 20px; }
-.rxTable { width: 100%; border-collapse: collapse; margin-top: 2mm; font-size: 13px; background: rgba(255,255,255,.6); }
-.rxTable th { background: #eef3f8; border: 1px solid #b9c6d3; padding: 4px 5px; font-size: 11.5px; color: #0b3a63; }
+.rxTable { width: 100%; border-collapse: collapse; margin-top: 2mm; font-size: .963em; background: rgba(255,255,255,.6); }
+.rxTable th { background: #eef3f8; border: 1px solid #b9c6d3; padding: 4px 5px; font-size: .885em; color: #0b3a63; }
 .rxTable td { border: 1px solid #d3dbe3; padding: 5px; vertical-align: top; }
-.rxTable td.med { font-weight: 700; font-size: 14px; }
+.rxTable td.med { font-weight: 700; font-size: 1.077em; }
 .rxTable td.c { text-align: center; }
 .rxTable tr.noteRow td { border-top: 0; font-size: 12px; color: #444; padding-top: 0; }
-.rxNote, .rxLabs, .rxNext { margin-top: 3mm; font-size: 13px; line-height: 1.8; }
+.rxNote, .rxLabs, .rxNext { margin-top: 3mm; font-size: .963em; line-height: 1.8; }
 .rxSign { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 10mm; font-size: 13px; }
 .rxSign .sig { border-top: 1px solid #555; padding-top: 2px; min-width: 45mm; text-align: center; color: #555; }
 .lhFoot { position: relative; z-index: 1; margin-top: auto; padding: 3mm 0 7mm; }

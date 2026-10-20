@@ -18,16 +18,18 @@ Pages['admin-dash'] = {
     $('#k2', view).innerHTML = kpi('عاید کل این ماه', money(M.income), { ic: 'money', cls: 'violet', sub: `پذیرش ${money(M.reception)} · دواخانه ${money(M.ph_net)} · لابراتوار ${money(M.lab_total)}` })
       + kpi('مصارف این ماه', money(M.expenses), { ic: 'receipt', cls: 'bad' }) + kpi('مفاد خالص این ماه', money(r2(M.ph_profit + M.lab_total + M.reception - M.expenses)), { ic: 'trend', cls: 'good', sub: 'مفاد دواخانه + لابراتوار + پذیرش − مصارف' })
       + kpi('موجودی دواخانه', money(dash.stock.cost_value), { ic: 'box', sub: `${dash.stock.low} دوا رو به اتمام · ${dash.stock.expiring} نزدیک انقضا` });
+    $('#k2', view).insertAdjacentHTML('afterend', `<div class="grid g4" style="margin-top:16px">${kpi('بستر این ماه', money(M.ipd || 0), { ic: 'bed', cls: 'violet', sub: `${dash.admitted || 0} مریض همین حالا بستری` })}${kpi('بل‌های منتظر صندوق', (dash.cashier_pending?.visits || 0) + (dash.cashier_pending?.labs || 0) + (dash.cashier_pending?.sales || 0), { ic: 'cash', cls: 'warn', sub: `فیس ${dash.cashier_pending?.visits || 0} · لابراتوار ${dash.cashier_pending?.labs || 0} · دواخانه ${dash.cashier_pending?.sales || 0}` })}${kpi('کمبود مواد لابراتوار', dash.lab_items_low || 0, { ic: 'flask', cls: dash.lab_items_low ? 'bad' : 'good' })}${kpi('حالت صندوق', (App.settings.cashier_mode || 'central') === 'central' ? 'صندوق مرکزی' : 'هر بخش جدا', { ic: 'wallet', sub: 'تنظیمات ← صندوق و بخش‌ها' })}</div>`);
     const agg = monthsAgg(days, months);
-    $('#lg', view).innerHTML = legendHTML([{ label: 'پذیرش' }, { label: 'دواخانه' }, { label: 'لابراتوار' }, { label: 'مصارف' }]);
-    barChart($('#c1', view), agg.map(m => m.short), [{ label: 'پذیرش', data: agg.map(m => m.reception) }, { label: 'دواخانه', data: agg.map(m => m.ph_net) }, { label: 'لابراتوار', data: agg.map(m => m.lab_total) }, { label: 'مصارف', data: agg.map(m => m.expenses), type: 'line' }], { money: true, stacked: false });
+    $('#lg', view).innerHTML = legendHTML([{ label: 'پذیرش' }, { label: 'دواخانه' }, { label: 'لابراتوار' }, { label: 'بستر' }, { label: 'مصارف' }]);
+    barChart($('#c1', view), agg.map(m => m.short), [{ label: 'پذیرش', data: agg.map(m => m.reception) }, { label: 'دواخانه', data: agg.map(m => m.ph_net) }, { label: 'لابراتوار', data: agg.map(m => m.lab_total) }, { label: 'بستر', data: agg.map(m => m.ipd || 0) }, { label: 'مصارف', data: agg.map(m => m.expenses), type: 'line' }], { money: true, stacked: false });
     const d30 = []; for (let i = 29; i >= 0; i--) d30.push(isoDate(addDays(new Date(), -i)));
     barChart($('#c2', view), d30.map(d => fmtDateNum(d).slice(5)), [{ label: 'مریضان', data: d30.map(d => (days.find(x => x.date === d) || {}).visits || 0) }]);
     $('#online', view).innerHTML = net.clients.length ? net.clients.map(c => `<div class="alertItem"><div class="alertIcon info">${icon(STATIONS[c.station]?.icon || 'user', 15)}</div><div><b>${esc(STATIONS[c.station]?.name || c.station)} — ${esc(c.user)}</b><span class="ltr">${esc(c.ip)}</span><span> · از ${fmtTime(c.since)}</span></div></div>`).join('') : '<div class="empty">هیچ ایستگاهی وصل نیست</div>';
     $('#pend', view).innerHTML = [
       ['نسخه‌های منتظر دواخانه', dash.rx_pending, 'rx-inbox'], ['آزمایش‌های در جریان', dash.lab_pending, 'lab-inbox'], ['بازپرداخت تخفیف داکتر', `${dash.refunds_due.c} (${money(dash.refunds_due.s)})`, 'visits'],
       ['طلب کمپنی‌ها', `${dash.supplier_debt.c} فاکتور — ${money(dash.supplier_debt.s)}`, 'purchases'], ['مصارف پرداخت نشده', `${dash.expenses_unpaid.c} — ${money(dash.expenses_unpaid.s)}`, 'expenses'],
-      ['دواهای رو به اتمام', dash.stock.low, 'medicines'], ['دواهای نزدیک انقضا', dash.stock.expiring, 'medicines']
+      ['دواهای رو به اتمام', dash.stock.low, 'medicines'], ['دواهای نزدیک انقضا', dash.stock.expiring, 'medicines'],
+      ['بل‌های منتظر صندوق مرکزی', (dash.cashier_pending?.visits || 0) + (dash.cashier_pending?.labs || 0) + (dash.cashier_pending?.sales || 0), 'cashier'], ['مریضان بستری', dash.admitted || 0, 'ipd'], ['کمبود مواد لابراتوار', dash.lab_items_low || 0, 'lab-items']
     ].map(([l, v, p]) => `<div class="alertItem" style="cursor:pointer" data-go="${p}"><div class="alertIcon info">${icon('next', 14)}</div><div><b>${esc(l)}</b><span>${esc(String(v))}</span></div></div>`).join('');
     view.addEventListener('click', (e) => { const g = e.target.closest('[data-go]'); if (g) go(g.dataset.go, g.dataset.go === 'purchases' ? { status: 'open' } : {}); });
     actions(view, { net: () => go('network') });
@@ -70,7 +72,7 @@ Pages.users = {
       <div class="card"><h2>دسترسی هر نقش</h2><table class="t"><tbody>
         <tr><td><b>مدیر</b></td><td>همه بخش‌ها + کاربران، تنظیمات، شبکه، پشتیبان، تغییر همه اطلاعات</td></tr>
         <tr><td><b>انبار و حسابات</b></td><td>دواها و موجودی، فاکتورهای خرید و اقساط، کمپنی‌ها، مصارف، برداشت‌ها، حسابات روزانه، مفاد ماهانه، گزارش فروش دواخانه و لابراتوار</td></tr>
-        <tr><td><b>پذیرش</b></td><td>ثبت مریض، نوبت، رزرو، فیس و رسید</td></tr><tr><td><b>داکتر</b></td><td>صف مریضان، پرونده، ویزیت، نسخه، درخواست آزمایش، تخفیف</td></tr>
+        <tr><td><b>پذیرش</b></td><td>ثبت مریض، نوبت، رزرو، فیس و رسید، صندوق مرکزی (فیس داکتر، لابراتوار، دواخانه، بستر)، پذیرش لابراتوار، بستر و تخت‌ها، حسابات روز و تحویل صندوق، ثبت داکتر و بخش</td></tr><tr><td><b>داکتر</b></td><td>صف مریضان، پرونده، ویزیت، نسخه، درخواست آزمایش، تخفیف</td></tr>
         <tr><td><b>دواخانه</b></td><td>نسخه‌های رسیده، فروش با کد نسخه، دو رسید، برگشت، فروش روزانه</td></tr><tr><td><b>لابراتوار</b></td><td>درخواست‌ها با کد، فیس و دو رسید، ثبت نتایج و ارسال به داکتر، قیمت آزمایش‌ها</td></tr></tbody></table></div>`;
     let rows = [];
     const load = async () => {
@@ -103,11 +105,18 @@ Pages.users = {
 Pages.setup = {
   async render(view) {
     view.innerHTML = `<div class="pageHead"><div><h1>داکتران، خدمات و فیس</h1><p>معلومات داکتران روی سرخط نسخه چاپ می‌شود. خدمات (OPD، سونوگرافی…) و فیس آن‌ها در پذیرش استفاده می‌شود.</p></div></div>
-      <div class="card"><div class="cardHead"><h2>${icon('steth')} داکتران</h2><button class="btn primary sm" data-act="newD">${icon('plus', 14)} داکتر جدید</button></div><div class="tableWrap"><table class="t"><thead><tr><th>عنوان و نام</th><th>تخصص</th><th>فیس ویزیت</th><th>روی سرخط</th><th>سمت</th><th>وضعیت</th><th></th></tr></thead><tbody id="dB"></tbody></table></div></div>
+      <div class="card"><div class="cardHead"><h2>${icon('steth')} داکتران</h2><button class="btn primary sm" data-act="newD">${icon('plus', 14)} داکتر جدید</button></div><div class="tableWrap"><table class="t"><thead><tr><th>عنوان و نام</th><th>بخش</th><th>نوع کار</th><th>تخصص</th><th>اطاق</th><th>فیس ویزیت</th><th>روی سرخط</th><th>سمت</th><th>وضعیت</th><th></th></tr></thead><tbody id="dB"></tbody></table></div></div>
+      <div class="grid g2"><div class="card"><div class="cardHead"><h2>${icon('list')} بخش‌های طبی (اطفال، نسائی، داخله…)</h2><button class="btn primary sm" data-act="newDep">${icon('plus', 14)} بخش جدید</button></div><div class="tableWrap"><table class="t"><thead><tr><th>نام بخش</th><th>داکتران</th><th>ترتیب</th><th>وضعیت</th><th></th></tr></thead><tbody id="depB"></tbody></table></div></div>
+        <div class="card"><div class="cardHead"><h2>${icon('bed')} اطاق‌ها و تخت‌های بستر</h2><button class="btn sm" data-act="beds">${icon('settings', 14)} مدیریت</button></div><div id="wardSum"></div></div></div>
       <div class="card"><div class="cardHead"><h2>${icon('ticket')} خدمات پذیرش</h2><button class="btn primary sm" data-act="newS">${icon('plus', 14)} خدمت جدید</button></div><div class="tableWrap"><table class="t"><thead><tr><th>کد</th><th>نام</th><th>فیس</th><th>نیاز به داکتر</th><th>داکتر پیش‌فرض</th><th>وضعیت</th><th></th></tr></thead><tbody id="sB"></tbody></table></div></div>`;
     const load = async () => {
       await loadBootstrap();
-      $('#dB', view).innerHTML = App.doctors.map(d => `<tr><td><b style="color:${esc(d.color)}">${esc(doctorName(d))}</b></td><td>${esc(d.specialty || '')}</td><td>${money(d.visit_fee)}</td><td>${d.on_letterhead ? 'بلی' : 'خیر'}</td><td>${d.letterhead_side === 'left' ? 'چپ' : 'راست'}</td><td>${d.active ? pill('فعال', 'good') : pill('غیرفعال', 'bad')}</td><td><button class="btn sm" data-act="editD" data-id="${d.id}">${icon('edit', 14)}</button></td></tr>`).join('');
+      $('#dB', view).innerHTML = App.doctors.map(d => `<tr><td><b style="color:${esc(d.color)}">${esc(doctorName(d))}</b></td><td>${esc(d.department_name || '—')}</td><td>${esc(d.work_type || '')}</td><td>${esc(d.specialty || '')}</td><td>${esc(d.room || '')}</td><td>${money(d.visit_fee)}</td><td>${d.on_letterhead ? 'بلی' : 'خیر'}</td><td>${d.letterhead_side === 'left' ? 'چپ' : 'راست'}</td><td>${d.active ? pill('فعال', 'good') : pill('غیرفعال', 'bad')}</td><td><button class="btn sm" data-act="editD" data-id="${d.id}">${icon('edit', 14)}</button></td></tr>`).join('');
+      const deps = await API.list('medical_departments', { limit: 200 });
+      $('#depB', view).innerHTML = deps.map(x => `<tr><td><b>${esc(x.name)}</b></td><td>${App.doctors.filter(d => d.department_id === x.id).length}</td><td>${x.sort}</td><td>${x.active ? pill('فعال', 'good') : pill('غیرفعال', 'bad')}</td><td><button class="btn sm" data-act="editDep" data-id="${x.id}">${icon('edit', 14)}</button></td></tr>`).join('') || emptyRow(5);
+      view._deps = deps;
+      const [wards, beds] = await Promise.all([API.list('wards', { limit: 100 }), API.list('beds', { limit: 500 })]);
+      $('#wardSum', view).innerHTML = wards.map(w => `<div class="selRow"><b style="flex:1">${esc(w.name)}</b><span>${beds.filter(b => b.ward_id === w.id && b.active).length} تخت</span><span>${money(w.daily_rate)} / روز</span>${w.active ? '' : pill('غیرفعال', 'bad')}</div>`).join('') || '<div class="empty">اطاقی تعریف نشده</div>';
       $('#sB', view).innerHTML = App.services.map(s => `<tr><td class="codeTag">${esc(s.code)}</td><td><b>${esc(s.name)}</b></td><td>${money(s.fee)}</td><td>${s.needs_doctor ? 'بلی' : 'خیر'}</td><td>${esc(doctorName(doctorById(s.default_doctor_id)) || '—')}</td><td>${s.active ? pill('فعال', 'good') : pill('غیرفعال', 'bad')}</td><td><button class="btn sm" data-act="editS" data-id="${s.id}">${icon('edit', 14)}</button></td></tr>`).join('');
     };
     const editD = (d) => {
@@ -135,7 +144,17 @@ Pages.setup = {
       $('[data-x]', m.el).onclick = m.close;
       $('#sv_ok', m.el).onclick = () => busy($('#sv_ok', m.el), async () => { const v = formValues($('#svF', m.el)); if (s.id) v.id = s.id; if (!v.code || !v.name) throw new Error('کد و نام الزامی است'); await API.save('services', v); m.close(); load(); }).catch(errToast);
     };
-    actions(view, { newD: () => editD(), editD: (b) => editD(doctorById(b.dataset.id)), newS: () => editS(), editS: (b) => editS(App.services.find(s => s.id === Number(b.dataset.id))) });
+    const editDep = (x) => {
+      x = x || { active: 1, sort: (view._deps || []).length + 1 };
+      const m = modal({ title: x.id ? 'ویرایش بخش' : 'بخش جدید', body: `<div class="formGrid" id="dpF"><label class="field span2"><span>نام بخش <em>*</em></span><input name="name" value="${esc(x.name || '')}"></label><label class="field"><span>ترتیب</span><input name="sort" type="number" value="${esc(x.sort)}"></label><label class="check"><input type="checkbox" name="active" ${x.active ? 'checked' : ''}> فعال</label></div>`,
+        foot: `<button class="btn primary" id="dp_ok">ذخیره</button><button class="btn" data-x>انصراف</button>` });
+      $('[data-x]', m.el).onclick = m.close;
+      $('#dp_ok', m.el).onclick = () => busy($('#dp_ok', m.el), async () => { const v = formValues($('#dpF', m.el)); if (x.id) v.id = x.id; if (!v.name) throw new Error('نام الزامی است'); await API.save('medical_departments', v); m.close(); load(); }).catch(errToast);
+    };
+    // doctors are edited with the shared dialog (department, type of work, room, weekly schedule + letterhead)
+    void editD;
+    actions(view, { newD: () => doctorDialog(null, load), editD: (b) => doctorDialog(doctorById(b.dataset.id), load), newS: () => editS(), editS: (b) => editS(App.services.find(s => s.id === Number(b.dataset.id))),
+      newDep: () => editDep(), editDep: (b) => editDep((view._deps || []).find(x => x.id === Number(b.dataset.id))), beds: () => wardsDlg(load) });
     await load();
   }
 };
@@ -147,7 +166,7 @@ Pages.settings = {
     const s = App.settings; const po = JSON.parse(s.rx_default_print || '{}');
     const L = (k, label, rows = 6) => `<label class="field"><span>${label} <span class="hint">(هر سطر یک مورد)</span></span><textarea name="${k}" rows="${rows}">${esc(s[k] || '')}</textarea></label>`;
     view.innerHTML = `<div class="pageHead"><div><h1>تنظیمات و سرخط نسخه</h1><p>این تنظیمات برای همه ایستگاه‌ها اعمال می‌شود.</p></div><div class="toolbar"><button class="btn" data-act="preview">${icon('eye')} پیش‌نمایش نسخه</button><button class="btn primary" data-act="save">${icon('check')} ذخیره تنظیمات</button></div></div>
-      <div class="tabs" id="stT"><button class="on" data-t="clinic">کلینیک و سرخط</button><button data-t="rx">نسخه و رسید</button><button data-t="codes">کدها و نوبت</button><button data-t="stock">دواخانه و انبار</button><button data-t="lists">لیست‌ها</button></div>
+      <div class="tabs" id="stT"><button class="on" data-t="clinic">کلینیک و سرخط</button><button data-t="rx">نسخه و رسید</button><button data-t="codes">کدها و نوبت</button><button data-t="stock">دواخانه و انبار</button><button data-t="lab">راپور لابراتوار</button><button data-t="cash">صندوق و بخش‌ها</button><button data-t="colors">رنگ ایستگاه‌ها</button><button data-t="lists">لیست‌ها</button></div>
       <form id="stF" autocomplete="off">
       <div class="card" data-p="clinic"><div class="formGrid">
         <label class="field span2"><span>نام کلینیک</span><input name="clinic_name" value="${esc(s.clinic_name || '')}"></label><label class="field"><span>نام انگلیسی</span><input name="clinic_name_en" class="en" value="${esc(s.clinic_name_en || '')}"></label>
@@ -167,6 +186,9 @@ Pages.settings = {
         <label class="field"><span>عرض رسید (mm)</span><select name="receipt_width">${opt([['80', '80 mm'], ['58', '58 mm']], s.receipt_width)}</select></label>
         <label class="field span2"><span>متن پایین رسیدها</span><input name="receipt_footer" value="${esc(s.receipt_footer || '')}"></label>
         <label class="field span2"><span>متن پایین راپور لابراتوار</span><input name="lab_report_footer" value="${esc(s.lab_report_footer || '')}"></label><label class="field"><span>امضای راپور</span><input name="lab_signature" class="en" value="${esc(s.lab_signature || '')}"></label></div>
+        <div class="secTitle">فونت و پاراگراف نسخه</div>
+        <div class="formGrid"><label class="field"><span>فونت</span><input name="rx_font" list="fontList" value="${esc(s.rx_font || 'Vazirmatn')}"></label><label class="field"><span>اندازه (px)</span><input name="rx_font_size" type="number" step="0.5" value="${esc(s.rx_font_size || 13.5)}"></label>
+          <label class="field"><span>نوع</span><select name="rx_font_weight">${opt([['normal', 'معمولی'], ['bold', 'ضخیم (Bold)']], s.rx_font_weight || 'normal')}</select></label><label class="field"><span>فاصله سطرها</span><input name="rx_line_height" type="number" step="0.1" value="${esc(s.rx_line_height || 1.6)}"></label></div>
         <div class="secTitle">بخش‌های پیش‌فرض روی نسخه مریض (داکتر هنگام ویزیت می‌تواند تغییر دهد)</div>
         <div class="printOpts" id="poBox">${[['vitals', 'علایم حیاتی'], ['complaint', 'شکایت'], ['diagnosis', 'تشخیص'], ['impression', 'Impression'], ['history', 'سابقه'], ['allergies', 'حساسیت'], ['notes', 'یادداشت داکتر'], ['labs', 'آزمایش‌ها'], ['next_visit', 'مراجعه بعدی'], ['print_note', 'توصیه'], ['barcode', 'بارکود']].map(([k, l]) => `<label class="check"><input type="checkbox" data-po="${k}" ${po[k] ? 'checked' : ''}> ${l}</label>`).join('')}</div></div>
       <div class="card hidden" data-p="codes"><div class="formGrid">
@@ -179,16 +201,53 @@ Pages.settings = {
         <label class="check"><input type="checkbox" name="allow_negative_stock" ${s.allow_negative_stock === '1' ? 'checked' : ''}> اجازه فروش بیشتر از موجودی</label>
         <label class="check"><input type="checkbox" name="auto_backup" ${s.auto_backup === '1' ? 'checked' : ''}> پشتیبان خودکار روزانه</label>
         <label class="field"><span>تعداد پشتیبان‌های نگه داشته شده</span><input name="backup_keep" type="number" value="${esc(s.backup_keep || 30)}"></label></div></div>
-      <div class="card hidden" data-p="lists"><div class="grid g3">${L('rx_forms', 'شکل دواها')}${L('rx_frequencies', 'دفعات مصرف')}${L('rx_timings', 'زمان مصرف')}${L('rx_units', 'واحد قوت')}${L('rx_routes', 'طریقه مصرف')}${L('rx_duration_units', 'واحد مدت', 3)}${L('expense_categories', 'کتگوری مصارف')}${L('medicine_categories', 'کتگوری دواها')}${L('medicine_units', 'واحد فروش دوا')}</div></div>
+      <div class="card hidden" data-p="lab"><div class="grid g-21"><div><div class="formGrid">
+        <label class="field span2"><span>فونت راپور <span class="hint">(از لیست انتخاب یا نام فونت نصب شده در ویندوز را بنویسید)</span></span><input name="lab_font" list="fontList" value="${esc(s.lab_font || 'Vazirmatn')}"></label>
+        <label class="field"><span>اندازه فونت (px)</span><input name="lab_font_size" type="number" step="0.5" value="${esc(s.lab_font_size || 12)}"></label>
+        <label class="field"><span>نوع فونت</span><select name="lab_font_weight">${opt([['normal', 'معمولی'], ['bold', 'ضخیم (Bold)']], s.lab_font_weight || 'normal')}</select></label>
+        <label class="field"><span>فاصله سطرها (پاراگراف)</span><input name="lab_line_height" type="number" step="0.1" value="${esc(s.lab_line_height || 1.5)}"></label>
+        <label class="field"><span>فاصله داخل خانه‌ها (px)</span><input name="lab_row_padding" type="number" value="${esc(s.lab_row_padding || 3)}"></label>
+        <label class="field"><span>جدول راپور</span><select name="lab_grid">${opt([['grid', 'با خطوط جدول (چارت)'], ['lines', 'فقط خطوط افقی'], ['none', 'بدون جدول']], s.lab_grid || 'grid')}</select></label>
+        <label class="field"><span>جای عنوان بخش (Haematology…)</span><select name="lab_section_align">${opt([['left', 'کنار (چپ)'], ['center', 'وسط'], ['right', 'کنار (راست)']], s.lab_section_align || 'left')}</select></label>
+        <label class="field"><span>جای نتیجه در خانه</span><select name="lab_result_align">${opt([['left', 'چپ'], ['center', 'وسط'], ['right', 'راست']], s.lab_result_align || 'left')}</select></label>
+        <label class="field"><span>معلومات مریض بالای راپور</span><select name="lab_patient_lang">${opt([['fa', 'فارسی (راست به چپ)'], ['en', 'انگلیسی']], s.lab_patient_lang || 'fa')}</select></label>
+        <label class="check"><input type="checkbox" name="lab_show_print_time" ${s.lab_show_print_time === '1' ? 'checked' : ''}> تاریخ و ساعت چاپ پایین راپور</label>
+        <label class="check"><input type="checkbox" name="lab_show_signature" ${s.lab_show_signature !== '0' ? 'checked' : ''}> جای امضا</label></div>
+        <div class="secTitle">لیبل تیوب نمونه</div><div class="formGrid"><label class="field"><span>عرض (mm)</span><input name="lab_label_w" type="number" value="${esc(s.lab_label_w || 50)}"></label><label class="field"><span>ارتفاع (mm)</span><input name="lab_label_h" type="number" value="${esc(s.lab_label_h || 25)}"></label><label class="field"><span>تعداد از هر لیبل</span><input name="lab_label_copies" type="number" value="${esc(s.lab_label_copies || 1)}"></label></div>
+        <div class="infoBox" style="margin-top:10px">آدرس کلینیک همیشه پایین صفحه چاپ می‌شود و به صفحه بعد نمی‌رود؛ اگر راپور طولانی باشد، سرخط و معلومات مریض در هر صفحه تکرار می‌شود.</div></div>
+        <div><button type="button" class="btn" data-act="labPrev">${icon('eye')} پیش‌نمایش راپور با این تنظیمات</button></div></div></div>
+      <div class="card hidden" data-p="cash"><div class="formGrid">
+        <label class="field span2"><span>دریافت پول</span><select name="cashier_mode">${opt([['central', 'صندوق مرکزی: همه پول‌ها (داکتر، لابراتوار، دواخانه، بستر) در پذیرش گرفته شود'], ['mixed', 'هر بخش هم می‌تواند پول بگیرد']], s.cashier_mode || 'central')}</select></label>
+        <label class="field"><span>پیشوند کد بستری</span><input name="admission_prefix" class="ltr" value="${esc(s.admission_prefix || 'IP-')}"></label>
+        <label class="check"><input type="checkbox" name="cdss_enabled" ${s.cdss_enabled !== '0' ? 'checked' : ''}> هشدار حساسیت، تداخل دوا و آزمایش تکراری برای داکتر</label>
+        <label class="field"><span>آزمایش تکراری اگر در چند روز گذشته بوده</span><input name="dup_lab_days" type="number" value="${esc(s.dup_lab_days || 7)}"></label>
+        <label class="field span2"><span>پوشه دوم برای کاپی پشتیبان (مثلاً فلش یا درایو D:\ClinicBackup)</span><input name="backup_extra_dir" class="ltr" value="${esc(s.backup_extra_dir || '')}"></label></div>
+        <div class="infoBox" style="margin-top:12px">در حالت صندوق مرکزی، دواخانه و لابراتوار فقط بل می‌سازند و رسید با «پرداخت در صندوق پذیرش» چاپ می‌شود؛ پذیرش در صفحه «صندوق مرکزی» پول را می‌گیرد و بخش مربوط خبر می‌شود. حسابات کل روز در «حسابات روز و تحویل صندوق» است.</div></div>
+      <div class="card hidden" data-p="colors"><p class="mini">رنگ اصلی هر ایستگاه (منو و دکمه‌ها). هر کمپیوتر می‌تواند در «تنظیمات این کمپیوتر» رنگ خودش را هم داشته باشد.</p><div class="formGrid">
+        ${Object.entries(STATIONS).map(([k, st]) => `<label class="field"><span>${esc(st.name)}</span><span class="bar"><input type="color" name="color_${k}" data-def="${st.color}" value="${esc(s['color_' + k] || st.color)}"><button type="button" class="btn sm" data-reset="${k}">پیش‌فرض</button></span></label>`).join('')}</div></div>
+      <datalist id="fontList">${PRINT_FONTS.map(f => `<option value="${esc(f)}">`).join('')}</datalist>
+      <div class="card hidden" data-p="lists"><div class="grid g3">${L('rx_forms', 'شکل دواها')}${L('rx_frequencies', 'دفعات مصرف')}${L('rx_timings', 'زمان مصرف')}${L('rx_units', 'واحد قوت')}${L('rx_routes', 'طریقه مصرف')}${L('rx_duration_units', 'واحد مدت', 3)}${L('expense_categories', 'کتگوری مصارف')}${L('medicine_categories', 'کتگوری دواها')}${L('medicine_units', 'واحد فروش دوا')}${L('doctor_work_types', 'نوع کار داکتران')}${L('lab_units', 'واحدهای لابراتوار')}</div></div>
       </form>`;
     $('#stT', view).onclick = (e) => { const b = e.target.closest('[data-t]'); if (!b) return; $$('#stT button', view).forEach(x => x.classList.toggle('on', x === b)); $$('[data-p]', view).forEach(p => p.classList.toggle('hidden', p.dataset.p !== b.dataset.t)); };
     const collect = () => {
       const v = {}; $$('#stF [name]', view).forEach(el => v[el.name] = el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value);
       const o = { patient: 1 }; $$('[data-po]', view).forEach(c => o[c.dataset.po] = c.checked ? 1 : 0); v.rx_default_print = JSON.stringify(o);
+      $$('#stF input[type=color][data-def]', view).forEach(el => { if (el.value.toLowerCase() === el.dataset.def.toLowerCase()) v[el.name] = ''; });
       return v;
     };
+    view.addEventListener('click', (e) => { const r = e.target.closest('[data-reset]'); if (r) { const el = $(`[name="color_${r.dataset.reset}"]`, view); el.value = el.dataset.def; } });
     actions(view, {
-      save: (b) => busy(b, async () => { await API.post('/api/settings', collect()); await loadBootstrap(); toast('تنظیمات ذخیره شد', 'good'); }),
+      save: (b) => busy(b, async () => { await API.post('/api/settings', collect()); await loadBootstrap(); Theme.apply(); toast('تنظیمات ذخیره شد', 'good'); }),
+      labPrev: () => {
+        const saved = App.settings; App.settings = { ...saved, ...collect() };
+        const t = (id, code, name, unit, lo, hi, dept, panel) => ({ id, code, name, unit, ref_low: lo, ref_high: hi, result_type: 'numeric', ranges: [], dept_name: dept, panel_id: panel || null });
+        const tests = [t(1, 'HB', 'Haemoglobin', 'g/dL', 12, 16, 'Haematology', 100), t(2, 'WBC', 'WBC count', '10³/µL', 4, 11, 'Haematology', 100), t(3, 'PLT', 'Platelets', '10³/µL', 150, 450, 'Haematology', 100), t(4, 'GLUF', 'Glucose (fasting)', 'mg/dL', 70, 110, 'Biochemistry'), t(5, 'TSH', 'TSH', 'µIU/mL', 0.4, 4.2, 'Hormones')];
+        const html = labReportHTML({ lab_code: 'LB-00045', patient_code: 'P-10001', full_name: 'مریم احمدی', father_name: 'محمد', sex: 'F', birth_date: isoDate(addDays(new Date(), -365 * 29)), doctor_name: App.doctors[0]?.name || '', received_at: new Date().toISOString(), approved_at: new Date().toISOString(),
+          items: [{ test_id: 100, name: 'CBC (Complete Blood Count)' }, { test_id: 4, name: 'Glucose (fasting)' }, { test_id: 5, name: 'TSH' }], tests,
+          results: [{ test_id: 1, value: '10.8', unit: 'g/dL' }, { test_id: 2, value: '7.2' }, { test_id: 3, value: '512', note: 'نمونه تکرار شد' }, { test_id: 4, value: '96' }, { test_id: 5, value: '2.1' }], report_note: 'Comment: sample shows mild microcytosis.' });
+        App.settings = saved;
+        previewDoc(html, { size: 'A4', title: 'نمونه راپور' });
+      },
       logo: async () => { const f = await pickFile('image/*'); if (!f) return; if (f.size > 700 * 1024) return toast('تصویر بزرگ است (حداکثر 700KB)', 'bad'); const d = 'data:' + f.type + ';base64,' + await fileToBase64(f); $('[name=clinic_logo]', view).value = d; $('#logoPrev', view).src = d; },
       logoReset: () => { $('[name=clinic_logo]', view).value = ''; $('#logoPrev', view).src = 'img/logo.png'; },
       preview: () => {
@@ -252,15 +311,23 @@ Pages.local = {
     view.innerHTML = `<div class="pageHead"><div><h1>تنظیمات این کمپیوتر</h1><p>این تنظیمات فقط برای همین کمپیوتر است.</p></div></div>
       <div class="grid g2"><div class="card"><h2>${icon('print')} پرینترها</h2>
         ${nat ? `<div class="formGrid"><label class="field span2"><span>پرینتر رسید (۸۰ میلی‌متر)</span><select id="pr_r">${pOpt(localGet('printer_receipt', ''))}</select></label><label class="check"><input type="checkbox" id="sl_r" ${localGet('silent_receipt', '0') === '1' ? 'checked' : ''}> چاپ مستقیم بدون پنجره</label>
-          <label class="field span2"><span>پرینتر نسخه / راپور (A5 / A4)</span><select id="pr_p">${pOpt(localGet('printer_page', ''))}</select></label><label class="check"><input type="checkbox" id="sl_p" ${localGet('silent_page', '0') === '1' ? 'checked' : ''}> چاپ مستقیم بدون پنجره</label></div>`
+          <label class="field span2"><span>پرینتر نسخه / راپور (A5 / A4)</span><select id="pr_p">${pOpt(localGet('printer_page', ''))}</select></label><label class="check"><input type="checkbox" id="sl_p" ${localGet('silent_page', '0') === '1' ? 'checked' : ''}> چاپ مستقیم بدون پنجره</label>
+          <label class="field span2"><span>پرینتر لیبل (تیوب لابراتوار)</span><select id="pr_l">${pOpt(localGet('printer_label', ''))}</select></label><label class="check"><input type="checkbox" id="sl_l" ${localGet('silent_label', '0') === '1' ? 'checked' : ''}> چاپ مستقیم بدون پنجره</label></div>`
         : '<div class="infoBox">در مرورگر، پرینتر در پنجره چاپ انتخاب می‌شود.</div>'}
         <div class="bar" style="margin-top:12px"><button class="btn" data-act="test">${icon('print')} چاپ آزمایشی رسید</button></div></div>
       <div class="card"><h2>${icon('settings')} عمومی</h2><label class="check"><input type="checkbox" id="snd" ${localGet('sound', '1') === '1' ? 'checked' : ''}> صدای اطلاع (نسخه / مریض / آزمایش جدید)</label>
+        <div class="secTitle">${icon('moon', 15)} حالت نمایش و رنگ</div>
+        <div class="chips" id="thM">${[['light', 'روشن'], ['dark', 'تاریک'], ['auto', 'خودکار (مطابق ویندوز)']].map(([k, l]) => `<button type="button" class="chip ${Theme.mode() === k ? 'on' : ''}" data-th="${k}">${l}</button>`).join('')}</div>
+        <div class="bar" style="margin-top:10px;flex-wrap:wrap">${['', '#0f7a3a', '#1d4ed8', '#7c3aed', '#be123c', '#c2410c', '#0e7490', '#334155'].map(c => `<button type="button" class="btn sm" data-acc="${c}" style="${c ? `background:${c};color:#fff;border-color:${c}` : ''}">${c ? '&nbsp;' : 'رنگ ایستگاه'}</button>`).join('')}<input type="color" id="accC" value="${esc(localGet('accent_' + (App.station || 'browser'), '') || STATIONS[App.station || 'admin']?.color || '#0f7a3a')}" title="رنگ دلخواه"></div>
         <div class="sum" style="flex-direction:column;gap:6px;margin-top:12px"><span>ایستگاه: <b>${esc(STATIONS[App.station]?.name || 'مرورگر')}</b></span><span>سرور: <b class="ltr">${esc(location.host)}</b></span><span>وضعیت: <b>${App.online ? 'متصل' : 'قطع'}</b></span>${nat ? `<span>نسخه برنامه: <b>${esc(nat.version || '')}</b></span>` : ''}</div>
         ${nat && nat.changeServer && App.station !== 'admin' ? `<button class="btn" style="margin-top:12px" data-act="srv">${icon('network')} تغییر آدرس سرور</button>` : ''}
         ${nat && nat.openData && App.station === 'admin' ? `<button class="btn" style="margin-top:12px" data-act="data">${icon('database')} باز کردن پوشه دیتابیس</button>` : ''}</div></div>`;
     const bind = (id, key, chk) => { const el = $('#' + id, view); if (el) el.onchange = () => { localSet(key, chk ? (el.checked ? '1' : '0') : el.value); toast('ذخیره شد', 'good'); }; };
-    bind('pr_r', 'printer_receipt'); bind('pr_p', 'printer_page'); bind('sl_r', 'silent_receipt', 1); bind('sl_p', 'silent_page', 1); bind('snd', 'sound', 1);
+    bind('pr_r', 'printer_receipt'); bind('pr_p', 'printer_page'); bind('pr_l', 'printer_label'); bind('sl_r', 'silent_receipt', 1); bind('sl_p', 'silent_page', 1); bind('sl_l', 'silent_label', 1); bind('snd', 'sound', 1);
+    $('#thM', view).onclick = (e) => { const b = e.target.closest('[data-th]'); if (!b) return; localSet('theme', b.dataset.th); $$('#thM .chip', view).forEach(x => x.classList.toggle('on', x === b)); Theme.apply(); };
+    const setAcc = (c) => { localSet('accent_' + (App.station || 'browser'), c); Theme.apply(); toast('رنگ ذخیره شد', 'good'); };
+    view.addEventListener('click', (e) => { const b = e.target.closest('[data-acc]'); if (b) setAcc(b.dataset.acc); });
+    $('#accC', view).onchange = (e) => setAcc(e.target.value);
     actions(view, {
       test: () => printDoc(`<div class="doc receipt">${smallHead('چاپ آزمایشی')}${rcRow('ایستگاه', esc(STATIONS[App.station]?.name || ''))}${rcRow('تاریخ', fmtDateTimeNum(new Date()))}${rcFooter()}</div>`, { size: 'receipt' }),
       srv: () => nat.changeServer(), data: () => nat.openData()

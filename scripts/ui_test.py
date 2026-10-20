@@ -9,12 +9,12 @@ ONLY = sys.argv[3].split(',') if len(sys.argv) > 3 else None
 os.makedirs(OUT, exist_ok=True)
 
 STATIONS = {
-  'admin': ('admin', '1234', ['admin-dash', 'network', 'users', 'setup', 'settings', 'audit', 'backup']),
-  'reception': ('reception', '1111', ['reception', 'visits', 'reservations', 'patients', 'rc-cash', 'local']),
-  'doctor': ('dr.abedi', '1111', ['dr-queue', 'encounter', 'rx-list', 'templates', 'dr-stats', 'patients']),
-  'pharmacy': ('pharmacy', '1111', ['rx-inbox', 'pos', 'sales', 'ph-daily', 'medicines', 'med-sales']),
-  'stock': ('stock', '1111', ['stock-dash', 'medicines', 'purchases', 'suppliers', 'expenses', 'withdrawals', 'daily', 'monthly', 'med-sales', 'import', 'sales']),
-  'lab': ('lab', '1111', ['lab-inbox', 'lab-walkin', 'lab-list', 'lab-tests', 'lab-sales']),
+  'admin': ('admin', '1234', ['admin-dash', 'network', 'users', 'setup', 'settings', 'audit', 'backup', 'local']),
+  'reception': ('reception', '1111', ['reception', 'visits', 'reservations', 'patients', 'cashier', 'rc-lab', 'ipd', 'rc-cash', 'qdisplay', 'local']),
+  'doctor': ('dr.abedi', '1111', ['dr-queue', 'encounter', 'rx-list', 'templates', 'dr-stats', 'patients', 'ipd', 'qdisplay']),
+  'pharmacy': ('pharmacy', '1111', ['rx-inbox', 'pos', 'sales', 'ph-daily', 'medicines', 'med-sales', 'reorder']),
+  'stock': ('stock', '1111', ['stock-dash', 'medicines', 'purchases', 'suppliers', 'expenses', 'withdrawals', 'daily', 'monthly', 'med-sales', 'reorder', 'lab-items', 'import', 'sales']),
+  'lab': ('lab', '1111', ['lab-inbox', 'lab-walkin', 'lab-list', 'lab-tests', 'lab-items', 'lab-sales']),
 }
 errors = []
 with sync_playwright() as p:

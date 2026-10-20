@@ -1,8 +1,8 @@
 // Advanced Clinical Database — SQLite schema
 // One database (on the Admin / server PC) shared by every station over the local network.
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
-const SCHEMA = `
+const TABLES = `
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0);
 
@@ -370,6 +370,80 @@ CREATE TABLE IF NOT EXISTS legacy_daily (
   pharmacy_sales REAL NOT NULL DEFAULT 0, lab_income REAL NOT NULL DEFAULT 0, note TEXT
 );
 
+
+-- ======================= v2: departments, schedules, cashier, lab materials, in-patients =======================
+CREATE TABLE IF NOT EXISTS medical_departments (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS doctor_schedules (
+  id INTEGER PRIMARY KEY, doctor_id INTEGER NOT NULL REFERENCES doctors(id) ON DELETE CASCADE,
+  weekday INTEGER NOT NULL,                  -- 0 = Sunday … 6 = Saturday
+  start_time TEXT, end_time TEXT, max_patients INTEGER
+);
+CREATE TABLE IF NOT EXISTS sale_payments (
+  id INTEGER PRIMARY KEY, sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+  amount REAL NOT NULL, method TEXT DEFAULT 'cash', note TEXT, station TEXT,
+  created_by INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS patient_deposits (           -- advance money kept for a patient (+ deposit, − used / refunded)
+  id INTEGER PRIMARY KEY, patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  amount REAL NOT NULL, method TEXT DEFAULT 'cash', note TEXT, ref_type TEXT, ref_id INTEGER, station TEXT,
+  created_by INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS cash_closes (                 -- end-of-day cash handover at reception
+  id INTEGER PRIMARY KEY, date TEXT NOT NULL, station TEXT, expected REAL NOT NULL DEFAULT 0, counted REAL NOT NULL DEFAULT 0,
+  difference REAL NOT NULL DEFAULT 0, handed_to TEXT, note TEXT, created_by INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS lab_items (                   -- laboratory materials / reagents store
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, unit TEXT, stock REAL NOT NULL DEFAULT 0, reorder_level REAL NOT NULL DEFAULT 0,
+  cost REAL NOT NULL DEFAULT 0, expiry TEXT, supplier TEXT, active INTEGER NOT NULL DEFAULT 1, notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS lab_item_moves (
+  id INTEGER PRIMARY KEY, at TEXT NOT NULL DEFAULT (datetime('now','localtime')), date TEXT NOT NULL,
+  item_id INTEGER NOT NULL REFERENCES lab_items(id) ON DELETE CASCADE,
+  qty REAL NOT NULL, kind TEXT NOT NULL,                 -- in | use | return | adjust | expired
+  unit_cost REAL, ref_type TEXT, ref_id INTEGER, note TEXT, user_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_labmoves_ref ON lab_item_moves(ref_type, ref_id);
+CREATE TABLE IF NOT EXISTS lab_test_items (              -- materials used by one test
+  test_id INTEGER NOT NULL REFERENCES lab_tests(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES lab_items(id) ON DELETE CASCADE,
+  qty REAL NOT NULL DEFAULT 1, PRIMARY KEY (test_id, item_id)
+);
+CREATE TABLE IF NOT EXISTS wards (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, daily_rate REAL NOT NULL DEFAULT 0, sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS beds (
+  id INTEGER PRIMARY KEY, ward_id INTEGER NOT NULL REFERENCES wards(id) ON DELETE CASCADE, name TEXT NOT NULL,
+  sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS admissions (
+  id INTEGER PRIMARY KEY, adm_no TEXT NOT NULL UNIQUE,
+  patient_id INTEGER NOT NULL REFERENCES patients(id), doctor_id INTEGER REFERENCES doctors(id),
+  status TEXT NOT NULL DEFAULT 'admitted',               -- admitted | discharged | cancelled
+  admitted_at TEXT NOT NULL, discharged_at TEXT, diagnosis TEXT, notes TEXT,
+  bed_total REAL NOT NULL DEFAULT 0, extra_total REAL NOT NULL DEFAULT 0, discount REAL NOT NULL DEFAULT 0,
+  net REAL NOT NULL DEFAULT 0, paid REAL NOT NULL DEFAULT 0,
+  created_by INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS admission_beds (
+  id INTEGER PRIMARY KEY, admission_id INTEGER NOT NULL REFERENCES admissions(id) ON DELETE CASCADE,
+  bed_id INTEGER NOT NULL REFERENCES beds(id), rate REAL NOT NULL DEFAULT 0, start_at TEXT NOT NULL, end_at TEXT, days REAL
+);
+CREATE TABLE IF NOT EXISTS admission_charges (
+  id INTEGER PRIMARY KEY, admission_id INTEGER NOT NULL REFERENCES admissions(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, amount REAL NOT NULL, created_by INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS admission_payments (
+  id INTEGER PRIMARY KEY, admission_id INTEGER NOT NULL REFERENCES admissions(id) ON DELETE CASCADE,
+  amount REAL NOT NULL, method TEXT DEFAULT 'cash', note TEXT, station TEXT,
+  created_by INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+`;
+
+const VIEWS = `
 -- ======================= reporting views =======================
 DROP VIEW IF EXISTS v_medicine_stock;
 CREATE VIEW v_medicine_stock AS
@@ -406,9 +480,20 @@ CREATE VIEW v_lab_requests AS
     (SELECT GROUP_CONCAT(i.name, ' · ') FROM lab_request_items i WHERE i.request_id = r.id) AS tests
   FROM lab_requests r JOIN patients p ON p.id = r.patient_id LEFT JOIN doctors d ON d.id = r.doctor_id;
 
+DROP VIEW IF EXISTS v_admissions;
+CREATE VIEW v_admissions AS
+  SELECT a.*, p.code AS patient_code, p.full_name, p.father_name, p.sex, p.birth_date, p.phone, d.name AS doctor_name,
+    (a.net - a.paid) AS balance,
+    (SELECT b.name || ' — ' || w.name FROM admission_beds ab JOIN beds b ON b.id=ab.bed_id JOIN wards w ON w.id=b.ward_id WHERE ab.admission_id=a.id ORDER BY ab.id DESC LIMIT 1) AS bed_name,
+    (SELECT ab.bed_id FROM admission_beds ab WHERE ab.admission_id=a.id ORDER BY ab.id DESC LIMIT 1) AS bed_id
+  FROM admissions a JOIN patients p ON p.id = a.patient_id LEFT JOIN doctors d ON d.id = a.doctor_id;
+
+DROP VIEW IF EXISTS v_doctors;
+CREATE VIEW v_doctors AS SELECT d.*, md.name AS department_name FROM doctors d LEFT JOIN medical_departments md ON md.id = d.department_id;
+
 DROP VIEW IF EXISTS v_sales;
 CREATE VIEW v_sales AS
-  SELECT s.*, (s.net - s.returned) AS net_after_return, ROUND((s.net - s.returned) - (s.cost - s.returned_cost), 2) AS profit,
+  SELECT s.*, (s.net - s.returned) AS net_after_return, (s.net - s.returned - s.paid) AS balance, ROUND((s.net - s.returned) - (s.cost - s.returned_cost), 2) AS profit,
     p.code AS patient_code, d.name AS doctor_name, u.full_name AS seller,
     (SELECT COUNT(*) FROM sale_items i WHERE i.sale_id = s.id) AS item_count
   FROM sales s LEFT JOIN patients p ON p.id = s.patient_id LEFT JOIN doctors d ON d.id = s.doctor_id LEFT JOIN users u ON u.id = s.created_by;
@@ -417,4 +502,5 @@ DROP VIEW IF EXISTS v_expenses;
 CREATE VIEW v_expenses AS SELECT e.*, (e.amount - e.paid) AS balance FROM expenses e;
 `;
 
-module.exports = { SCHEMA, SCHEMA_VERSION };
+const SCHEMA = TABLES + VIEWS;
+module.exports = { SCHEMA, TABLES, VIEWS, SCHEMA_VERSION };

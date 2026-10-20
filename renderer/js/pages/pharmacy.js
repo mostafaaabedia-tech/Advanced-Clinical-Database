@@ -26,9 +26,12 @@ Pages['rx-inbox'] = {
 };
 
 // ================================================================ POS / dispensing
+// central cashier: the pharmacy station only bills; the money is collected at the reception
+const centralPharmacy = () => (App.settings.cashier_mode || 'central') === 'central' && App.user?.station === 'pharmacy';
 Pages.pos = {
   async render(view, params) {
     const st = { rx: null, lines: [], walkin: !params.code };
+    const central = centralPharmacy();
     view.innerHTML = `<div class="pageHead"><div><h1>فروش و تحویل نسخه</h1><p>کد نسخه را بنویسید یا بارکود نسخه را اسکن کنید. سیستم دواها، موجودی و قیمت را حساب می‌کند. برای فروش آزاد، دوا را مستقیم جستجو کنید.</p></div>
       <div class="toolbar"><button class="btn" data-act="inbox">${icon('bell')} نسخه‌های رسیده</button><button class="btn" data-act="clear">${icon('refresh')} فروش جدید</button></div></div>
       <div class="posGrid">
@@ -49,13 +52,14 @@ Pages.pos = {
             </div>
             <div class="bigTotal" id="bigNet">0</div>
             <div class="formGrid" style="margin-top:10px">
-              <label class="field"><span>دریافت شده</span><input type="number" id="paid"></label>
-              <label class="field"><span>طریقه</span><select id="pm">${opt(Object.entries(PAY_METHODS), 'cash')}</select></label>
+              ${central ? `<div class="infoBox full">${icon('cash', 15)} پول در <b>صندوق پذیرش</b> گرفته می‌شود. بعد از ثبت، بل با کد فروش به صندوق می‌رود؛ وقتی پرداخت شد اینجا خبر می‌آید.</div><input type="hidden" id="paid" value=""><input type="hidden" id="pm" value="cash">`
+                : `<label class="field"><span>دریافت شده</span><input type="number" id="paid"></label>
+              <label class="field"><span>طریقه</span><select id="pm">${opt(Object.entries(PAY_METHODS), 'cash')}</select></label>`}
               <label class="field full"><span>یادداشت</span><input id="note"></label>
             </div>
             <div class="sum" id="change"></div>
             <div class="stack" style="margin-top:12px">
-              <button class="btn primary lg" data-act="sell" data-print="1" style="justify-content:center">${icon('print')} ثبت فروش و چاپ دو رسید <span class="kbd">F9</span></button>
+              <button class="btn primary lg" data-act="sell" data-print="1" style="justify-content:center">${icon('print')} ${central ? 'ثبت، ارسال به صندوق و چاپ دو رسید' : 'ثبت فروش و چاپ دو رسید'} <span class="kbd">F9</span></button>
               <button class="btn" data-act="sell" style="justify-content:center">${icon('check')} ثبت بدون چاپ</button>
             </div>
           </div>
@@ -67,7 +71,9 @@ Pages.pos = {
         const short = l.med && l.qty > l.med.stock;
         return `<tr class="${short ? 'short' : ''}" data-i="${i}"><td class="c"><input type="checkbox" data-f="on" ${l.on ? 'checked' : ''} style="width:auto"></td>
           <td>${l.rx ? `<div class="en"><b>${esc(l.rx.name)}</b> <small>${esc([l.rx.form, l.rx.strength, l.rx.unit].filter(Boolean).join(' '))}</small></div><small class="muted">${esc([l.rx.dose, l.rx.frequency, l.rx.timing, l.rx.duration ? l.rx.duration + ' ' + (l.rx.duration_unit || '') : ''].filter(Boolean).join(' · '))}${l.rx.qty ? ' — تعداد نسخه: ' + fmtNum(l.rx.qty) : ''}${l.dispensed ? ' — قبلاً: ' + fmtNum(l.dispensed) : ''}</small>` : '<small class="muted">اضافه (بدون نسخه)</small>'}</td>
-          <td class="medCell">${l.med ? `<b>${esc(l.med.name)}</b> <small class="muted">#${l.med.code} ${esc(l.med.strength || '')}</small>` : '<span class="neg">در لیست دواخانه پیدا نشد</span>'}<br><button class="btn sm ghost" data-pick="${i}">${icon('search', 12)} ${l.med ? 'تغییر' : 'انتخاب دوا'}</button></td>
+          <td class="medCell">${l.med ? `<b>${esc(l.med.name)}</b> <small class="muted">#${l.med.code} ${esc(l.med.strength || '')}</small>` : '<span class="neg">در لیست دواخانه پیدا نشد</span>'}<br><button class="btn sm ghost" data-pick="${i}">${icon('search', 12)} ${l.med ? 'تغییر' : 'انتخاب دوا'}</button>
+            ${(!l.med || l.med.stock <= 0) && (l.alts || []).length ? `<div class="altHint">جایگزین موجود (همان ماده): ${l.alts.map((a, k) => `<a href="#" data-alt="${i}:${k}">${esc(a.name)} ${esc(a.strength || '')} (${fmtNum(a.stock)})</a>`).join(' · ')}</div>` : ''}
+            ${l.med && l.med.stock <= 0 && !l.alts ? `<a href="#" class="altHint" data-findalt="${i}">جستجوی جایگزین</a>` : ''}</td>
           <td class="${l.med && l.med.stock > 0 ? 'pos' : 'neg'}">${l.med ? fmtNum(l.med.stock) + ' ' + esc(l.med.unit || '') : '—'}</td>
           <td><input type="number" data-f="qty" value="${l.qty}" min="0"></td><td><input type="number" data-f="price" value="${l.price}" min="0" ${isRole('stock') || App.user.role === 'pharmacy' ? '' : 'readonly'}></td>
           <td class="money">${money(l.on ? l.qty * l.price : 0)}</td><td><button class="btn ghost icon" data-rm="${i}">${icon('x', 14)}</button></td></tr>`;
@@ -79,6 +85,7 @@ Pages.pos = {
       let disc = $('#dAmt', view).value !== '' ? Math.min(sub, Number($('#dAmt', view).value) || 0) : r2(sub * (Number($('#dPct', view).value) || 0) / 100);
       const net = r2(sub - disc);
       $('#tSub', view).textContent = money(sub); $('#tNet', view).textContent = money(net); $('#bigNet', view).textContent = money(net) + ' ' + currency();
+      if (central) { $('#change', view).innerHTML = `<span>قابل پرداخت در صندوق پذیرش: <b>${money(net)}</b></span>`; st.net = net; st.disc = disc; st.sub = sub; return; }
       if (!$('#paid', view).dataset.touched) $('#paid', view).value = net;
       const paid = Number($('#paid', view).value) || 0;
       $('#change', view).innerHTML = paid > net ? `<span>باقی برای مشتری: <b class="pos">${money(paid - net)}</b></span>` : paid < net ? `<span>باقی‌مانده (قرض): <b class="neg">${money(net - paid)}</b></span>` : '<span>حساب تصفیه</span>';
@@ -92,6 +99,8 @@ Pages.pos = {
     linesEl.addEventListener('change', (e) => { if (e.target.dataset.f === 'on') { st.lines[Number(e.target.closest('tr').dataset.i)].on = e.target.checked; draw(); } });
     linesEl.addEventListener('click', async (e) => {
       const rm = e.target.closest('[data-rm]'); if (rm) { st.lines.splice(Number(rm.dataset.rm), 1); draw(); return; }
+      const alt = e.target.closest('[data-alt]'); if (alt) { e.preventDefault(); const [i, k] = alt.dataset.alt.split(':').map(Number); const l = st.lines[i]; const med = l.alts[k]; Object.assign(l, { med, price: med.sell_price, on: true, qty: Math.min(l.qty || 1, med.stock) || 1 }); toast('جایگزین شد: ' + med.name, 'good'); draw(); return; }
+      const fa = e.target.closest('[data-findalt]'); if (fa) { e.preventDefault(); const l = st.lines[Number(fa.dataset.findalt)]; l.alts = await API.get('/api/medicine-alternatives/' + l.med.id).catch(() => []); if (!l.alts.length) toast('دوای جایگزین با همان ماده (generic) موجود نیست', 'warn'); draw(); return; }
       const pk = e.target.closest('[data-pick]'); if (pk) {
         const i = Number(pk.dataset.pick);
         const m = modal({ title: 'انتخاب دوا از دواخانه', body: `<div class="searchBox"><input id="pk_q" value="${esc(st.lines[i].rx?.name || '')}" placeholder="نام یا کد دوا"></div><div id="pk_r" style="margin-top:10px"></div>` });
@@ -114,7 +123,7 @@ Pages.pos = {
       code = String(code || '').trim(); if (!code) return;
       const rx = await API.get('/api/rx/' + encodeURIComponent(code));
       st.rx = rx; st.walkin = false;
-      st.lines = rx.items.map(it => { const left = Math.max(0, (Number(it.qty) || 1) - (it.dispensed || 0)); return { rx: it, med: it.match, qty: it.match && it.match.stock > 0 ? Math.min(left, it.match.stock) : left, price: it.match ? it.match.sell_price : 0, on: !!it.match && left > 0 && it.match.stock > 0, dispensed: it.dispensed }; });
+      st.lines = rx.items.map(it => { const left = Math.max(0, (Number(it.qty) || 1) - (it.dispensed || 0)); return { rx: it, med: it.match, qty: it.match && it.match.stock > 0 ? Math.min(left, it.match.stock) : left, price: it.match ? it.match.sell_price : 0, on: !!it.match && left > 0 && it.match.stock > 0, dispensed: it.dispensed, alts: it.alternatives }; });
       $('#rxCode', view).value = rx.rx_code;
       $('#rxHead', view).innerHTML = `<div class="ptHead">${patientHeadHTML(rx.patient)}<div style="text-align:center"><div class="rxCode">${esc(rx.rx_code)}</div>${statusPill(RX_STATUS, rx.status)}</div></div>
         <div class="sum"><span>داکتر: <b>${esc(doctorName({ title: rx.doctor_title, name: rx.doctor_name }))}</b></span><span>تاریخ: <b>${fmtDate(rx.date)}</b></span>${rx.discount_pct ? `<span>تخفیف داکتر: <b class="pos">${fmtNum(rx.discount_pct)}٪</b></span>` : ''}${rx.note ? `<span>توصیه: ${esc(rx.note)}</span>` : ''}
@@ -135,7 +144,7 @@ Pages.pos = {
       const sale = await API.post('/api/sales/create', { prescription_id: st.rx?.id, patient_name: st.rx ? undefined : $('#ptName', view).value, items,
         discount_pct: $('#dAmt', view).value === '' ? $('#dPct', view).value : undefined, discount: $('#dAmt', view).value === '' ? undefined : $('#dAmt', view).value,
         paid: $('#paid', view).value, pay_method: $('#pm', view).value, note: $('#note', view).value });
-      toast(`فروش ${sale.sale_code} ثبت شد — ${money(sale.net)} ${currency()}`, 'good');
+      toast(central && sale.balance > 0.001 ? `فروش ${sale.sale_code} ثبت شد — ${money(sale.balance)} ${currency()} در صندوق پذیرش پرداخت شود` : `فروش ${sale.sale_code} ثبت شد — ${money(sale.net)} ${currency()}`, 'good');
       if (print) await printDoc(saleReceiptsHTML(sale), { size: 'receipt', title: sale.sale_code });
       else previewDoc(saleReceiptsHTML(sale), { size: 'receipt', title: sale.sale_code });
       go('pos');
@@ -157,22 +166,23 @@ Pages.sales = {
     view.innerHTML = `<div class="pageHead"><div><h1>لیست فروشات دواخانه</h1><p>همه فروشات با کد، چاپ دوباره رسیدها و برگشت دوا.</p></div><div class="toolbar"><button class="btn" data-act="csv">${icon('download')} CSV</button></div></div>
       <div class="filterBar"><label class="field"><span>از</span>${dateInput('from', today(), 'id="s_from"')}</label><label class="field"><span>تا</span>${dateInput('to', today(), 'id="s_to"')}</label>
       <label class="field"><span>نوع</span><select id="s_kind">${opt([['rx', 'با نسخه'], ['free', 'بدون نسخه']], '', { empty: 'همه' })}</select></label><label class="field grow"><span>جستجو</span><input id="s_q" placeholder="کد فروش، کد نسخه، نام مریض…"></label></div>
-      <div class="card"><div class="tableWrap"><table class="t"><thead><tr><th>کد فروش</th><th>تاریخ</th><th>کد نسخه</th><th>مریض</th><th>اقلام</th><th>جمع</th><th>تخفیف</th><th>خالص</th><th>برگشت</th>${seeProfit ? '<th>مفاد</th>' : ''}<th>فروشنده</th><th>وضعیت</th><th></th></tr></thead><tbody id="sB"></tbody></table></div><div class="sum" id="sS"></div></div>`;
+      <div class="card"><div class="tableWrap"><table class="t"><thead><tr><th>کد فروش</th><th>تاریخ</th><th>کد نسخه</th><th>مریض</th><th>اقلام</th><th>جمع</th><th>تخفیف</th><th>خالص</th><th>برگشت</th><th>پرداخت</th>${seeProfit ? '<th>مفاد</th>' : ''}<th>فروشنده</th><th>وضعیت</th><th></th></tr></thead><tbody id="sB"></tbody></table></div><div class="sum" id="sS"></div></div>`;
     let rows = [];
     const load = async () => {
       const q = { from: dateOf($('#s_from', view)), to: dateOf($('#s_to', view)), q: $('#s_q', view).value.trim(), limit: 5000 };
       if ($('#s_kind', view).value === 'rx') q['notnull.rx_code'] = 1; if ($('#s_kind', view).value === 'free') q['null.rx_code'] = 1;
       rows = await API.list('sales', q);
       $('#sB', view).innerHTML = rows.map(s => `<tr><td class="codeTag">${esc(s.sale_code)}</td><td>${fmtDate(s.date)} <small class="muted">${fmtTime(s.created_at)}</small></td><td class="codeTag">${esc(s.rx_code || '—')}</td><td>${esc(s.patient_name || '—')}</td><td class="c">${s.item_count}</td>
-        <td>${money(s.subtotal)}</td><td>${s.discount ? money(s.discount) : ''}</td><td class="money">${money(s.net)}</td><td class="neg">${s.returned ? money(s.returned) : ''}</td>${seeProfit ? `<td class="${s.profit >= 0 ? 'pos' : 'neg'}">${money(s.profit)}</td>` : ''}<td>${esc(s.seller || '')}</td>
-        <td>${s.status === 'done' ? '' : pill(s.status === 'returned' ? 'برگشت کامل' : 'برگشت قسمی', 'warn')}</td><td class="nowrap"><button class="btn sm" data-act="view" data-id="${s.id}">${icon('receipt', 14)} رسید</button> <button class="btn sm" data-act="ret" data-id="${s.id}">برگشت</button></td></tr>`).join('') || emptyRow(13);
+        <td>${money(s.subtotal)}</td><td>${s.discount ? money(s.discount) : ''}</td><td class="money">${money(s.net)}</td><td class="neg">${s.returned ? money(s.returned) : ''}</td><td>${s.balance > 0.001 ? `${pill(s.paid ? 'باقی ' + money(s.balance) : 'پرداخت نشده', s.paid ? 'warn' : 'bad')}` : s.balance < -0.001 ? pill('قابل بازپرداخت ' + money(-s.balance), 'bad') : pill('پرداخت شد', 'good')}</td>${seeProfit ? `<td class="${s.profit >= 0 ? 'pos' : 'neg'}">${money(s.profit)}</td>` : ''}<td>${esc(s.seller || '')}</td>
+        <td>${s.status === 'done' ? '' : pill(s.status === 'returned' ? 'برگشت کامل' : 'برگشت قسمی', 'warn')}</td><td class="nowrap"><button class="btn sm" data-act="view" data-id="${s.id}">${icon('receipt', 14)} رسید</button> <button class="btn sm" data-act="ret" data-id="${s.id}">برگشت</button>${!centralPharmacy() && Math.abs(s.balance) > 0.001 && isRole('pharmacy', 'stock') ? ` <button class="btn sm success" data-act="pay" data-id="${s.id}" data-bal="${s.balance}">${icon('cash', 14)}</button>` : ''}</td></tr>`).join('') || emptyRow(14);
       const tot = (k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
-      $('#sS', view).innerHTML = `<span>تعداد: <b>${rows.length}</b></span><span>فروش خالص: <b>${money(tot('net'))}</b></span><span>برگشتی: <b>${money(tot('returned'))}</b></span><span>بعد از برگشت: <b>${money(tot('net') - tot('returned'))}</b></span>${seeProfit ? `<span>مفاد: <b class="pos">${money(tot('profit'))}</b></span>` : ''}`;
+      $('#sS', view).innerHTML = `<span>تعداد: <b>${rows.length}</b></span><span>پرداخت نشده: <b class="neg">${money(rows.reduce((a, r) => a + Math.max(0, r.balance), 0))}</b></span><span>فروش خالص: <b>${money(tot('net'))}</b></span><span>برگشتی: <b>${money(tot('returned'))}</b></span><span>بعد از برگشت: <b>${money(tot('net') - tot('returned'))}</b></span>${seeProfit ? `<span>مفاد: <b class="pos">${money(tot('profit'))}</b></span>` : ''}`;
     };
     $$('#s_from, #s_to, #s_kind', view).forEach(el => el.addEventListener('change', load)); $('#s_q', view).addEventListener('input', debounce(load, 300));
     actions(view, {
       view: async (b) => { const s = await API.get('/api/sales/' + b.dataset.id); previewDoc(saleReceiptsHTML(s), { size: 'receipt', title: s.sale_code }); },
       ret: async (b) => returnDialog(Number(b.dataset.id), load),
+      pay: async (b) => { const a = await promptDlg('دریافت باقی فروش', { label: 'مبلغ (منفی = بازپرداخت)', value: b.dataset.bal, type: 'number' }); if (a) { await API.post('/api/sales/pay/' + b.dataset.id, { amount: Number(a), method: 'cash' }); toast('ثبت شد', 'good'); load(); } },
       csv: () => exportCSV('pharmacy-sales', rows, [['sale_code', 'کد فروش'], ['date', 'تاریخ'], ['rx_code', 'کد نسخه'], ['patient_name', 'مریض'], ['subtotal', 'جمع'], ['discount', 'تخفیف'], ['net', 'خالص'], ['returned', 'برگشت'], ...(seeProfit ? [['cost', 'قیمت تمام شد'], ['profit', 'مفاد']] : []), ['seller', 'فروشنده']])
     });
     await load(); this._load = load;

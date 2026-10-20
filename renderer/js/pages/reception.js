@@ -31,11 +31,15 @@ Pages.reception = {
               <label class="field c3"><span>نام مریض <em>*</em></span><input name="full_name" id="f_name" autocomplete="off"></label>
               <label class="field c3"><span>ولد (نام پدر)</span><input name="father_name" autocomplete="off"></label>
               <label class="field c2"><span>جنس</span><div class="chips" id="sexChips"><button type="button" class="chip on" data-sex="M">مذکر</button><button type="button" class="chip" data-sex="F">مونث</button></div></label>
-              <label class="field c1"><span>سن (سال)</span><input name="age_years" type="number" min="0" max="120"></label>
-              <label class="field c1"><span>ماه</span><input name="age_months" type="number" min="0" max="11"></label>
-              <label class="field c2"><span>شماره تلفن</span><input name="phone" class="ltr" autocomplete="off"></label>
-              <label class="field c4" style="grid-column:span 4"><span>آدرس</span><input name="address" autocomplete="off"></label>
-              <label class="field c2"><span>وزن (kg) <span class="hint">اختیاری</span></span><input name="weight" type="number" step="0.1"></label>
+              <div class="field c4" style="grid-column:span 4"><span>سن <span class="hint">(برای اطفال ماه و روز هم بنویسید)</span></span>${ageInputHTML('rcAge')}</div>
+              <label class="field c3"><span>شماره تلفن</span><input name="phone" class="ltr" autocomplete="off"></label>
+              <label class="field c3"><span>آدرس</span><input name="address" autocomplete="off"></label>
+              <label class="field c1"><span>وزن (kg)</span><input name="weight" type="number" step="0.1"></label>
+              <label class="field c1"><span>قد (cm)</span><input name="height" type="number" step="0.5"></label>
+              <div class="field c1" style="justify-content:flex-end"><small class="muted" id="bmiHint"></small></div>
+              <details class="c6" style="grid-column:1/-1"><summary class="muted small" style="cursor:pointer">معلومات بیشتر: شخص تماس اضطراری، بیمه، تذکره</summary>
+                <div class="formGrid" style="margin-top:8px"><label class="field"><span>شخص تماس اضطراری</span><input name="emergency_name"></label><label class="field"><span>تلفن اضطراری</span><input name="emergency_phone" class="ltr"></label>
+                <label class="field"><span>بیمه</span><input name="insurance"></label><label class="field"><span>شماره بیمه</span><input name="insurance_no" class="ltr"></label><label class="field"><span>تذکره</span><input name="tazkira"></label></div></details>
             </div>
           </div>
           <div class="card">
@@ -46,9 +50,8 @@ Pages.reception = {
               <label class="field span2"><span>نام خدمت (دستی)</span><input id="cs_name" placeholder="مثلاً: حجامت، پانسمان، مشوره…"></label>
               <label class="check" style="align-self:end"><input type="checkbox" id="cs_save"> ذخیره در لیست خدمات</label>
             </div>
-            <div class="secTitle" style="margin-top:16px">${icon('steth', 15)} داکتر</div>
-            <div class="svcChips drChips" id="drChips">${docs.map(d => `<button type="button" class="svcChip" data-dr="${d.id}"><b>${esc(doctorName(d))}</b><small>${esc(d.specialty || '')}</small><small class="qcount" data-q="${d.id}"></small></button>`).join('')}
-              <button type="button" class="svcChip" data-dr=""><b>بدون داکتر</b><small>خدمات عمومی</small></button></div>
+            <div class="secTitle" style="margin-top:16px">${icon('steth', 15)} داکتر <small class="muted">— بخش، نوع کار و تعداد نوبت هر داکتر در لیست دیده می‌شود</small></div>
+            ${doctorPickerHTML('rcDr')}
           </div>
         </div>
         <div>
@@ -87,7 +90,6 @@ Pages.reception = {
     let todayVisits = [];
     const loadToday = async () => {
       todayVisits = await API.list('visits', { 'eq.visit_date': st.reserve ? (dateOf($('#f_date', view)) || today()) : today(), limit: 2000 });
-      $$('.qcount', view).forEach(el => { const n = todayVisits.filter(v => v.doctor_id === Number(el.dataset.q) && ['waiting', 'in_visit'].includes(v.status)).length; el.textContent = n ? `${n} نفر در انتظار` : ''; });
       updateTurn();
     };
     const updateTurn = () => {
@@ -106,7 +108,8 @@ Pages.reception = {
     const fillPatient = async (p) => {
       st.patient = p;
       F('full_name').value = p.full_name || ''; F('father_name').value = p.father_name || ''; F('phone').value = p.phone || ''; F('address').value = p.address || '';
-      const a = ageParts(p.birth_date); F('age_years').value = a ? a.y : ''; F('age_months').value = a && a.y < 3 ? a.m : '';
+      ['emergency_name', 'emergency_phone', 'insurance', 'insurance_no', 'tazkira'].forEach(k => F(k).value = p[k] || '');
+      setAgeInput(f, 'rcAge', p.birth_date);
       setSex(p.sex || 'M');
       $('#ptBadge', view).innerHTML = `<span class="pill info">مریض قبلی · ${esc(p.code)}</span>`;
       $('#ptSearch', view).value = '';
@@ -115,10 +118,10 @@ Pages.reception = {
         ${b.visits.slice(0, 8).map(v => `<tr><td>${fmtDate(v.visit_date)}</td><td>${esc(v.service_name)}</td><td>${esc(v.doctor_name || '—')}</td><td class="c">${v.turn_no || ''}</td><td>${statusPill(VISIT_STATUS, v.status)}</td><td>${money(v.net)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">اولین مراجعه</div>'}`;
       // suggest the doctor of the last visit
       const last = b.visits.find(v => v.doctor_name);
-      if (last && !st.dr) { const d = App.doctors.find(x => x.name === last.doctor_name); if (d) pickDr(d.id); }
+      if (last && !st.dr) { const d = App.doctors.find(x => x.name === last.doctor_name); if (d) drPick.set(d.id); }
     };
     const clearPatient = () => {
-      st.patient = null; ['full_name', 'father_name', 'phone', 'address', 'age_years', 'age_months', 'weight'].forEach(k => F(k).value = ''); setSex('M');
+      st.patient = null; ['full_name', 'father_name', 'phone', 'address', 'weight', 'height', 'emergency_name', 'emergency_phone', 'insurance', 'insurance_no', 'tazkira'].forEach(k => F(k).value = ''); setAgeInput(f, 'rcAge', null); setSex('M');
       $('#ptBadge', view).innerHTML = '<span class="pill">مریض جدید</span>';
       $('#ptHist', view).innerHTML = `<h2>${icon('clock')} سوابق مراجعه</h2><div class="muted small">مریض را جستجو کنید تا سوابق قبلی نمایش داده شود.</div>`;
       $('#f_name', view).focus();
@@ -128,33 +131,30 @@ Pages.reception = {
       $$('#svcChips .svcChip', view).forEach(c => c.classList.toggle('on', c.dataset.svc === String(id)));
       $('#customSvc', view).classList.toggle('hidden', !st.custom);
       if (st.custom) { $('#cs_name', view).focus(); $('#f_fee', view).value = ''; }
-      if (st.svc && st.svc.default_doctor_id && !st.dr) pickDr(st.svc.default_doctor_id, true);
-      if (st.svc && !st.svc.needs_doctor && !st.dr) pickDr('', true);
+      if (st.svc && st.svc.default_doctor_id && !st.dr) drPick.set(st.svc.default_doctor_id);
       setFee();
     };
-    const pickDr = (id, silent) => {
-      st.dr = id ? App.doctors.find(d => d.id === Number(id)) : null;
-      $$('#drChips .svcChip', view).forEach(c => c.classList.toggle('on', c.dataset.dr === String(id || '')));
-      if (!silent) setFee(); else updateTurn();
-    };
+    const drPick = bindDoctorPicker(view, 'rcDr', { onPick: (d) => { st.dr = d; setFee(); } });
     // defaults
     clearPatient(); $('#ptBadge', view).innerHTML = '<span class="pill">مریض جدید</span>';
     const opd = svcs.find(s => /^OPD$/i.test(s.code)) || svcs[0]; if (opd) pickSvc(opd.id);
-    if (docs.length === 1) pickDr(docs[0].id);
+    if (docs.length === 1) drPick.set(docs[0].id);
+    bindAgeInput(f, 'rcAge');
+    const bmiUpd = () => { const b = bmi(F('weight').value, F('height').value); $('#bmiHint', view).textContent = b ? 'BMI ' + b : ''; };
+    F('weight').addEventListener('input', bmiUpd); F('height').addEventListener('input', bmiUpd);
     await loadToday();
     if (params.patient_id) { const p = await API.one('patients', params.patient_id); if (p) await fillPatient(p); }
 
     patientSearch($('#ptSearch', view), fillPatient);
     $('#sexChips', view).onclick = (e) => { const b = e.target.closest('[data-sex]'); if (b) setSex(b.dataset.sex); };
     $('#svcChips', view).onclick = (e) => { const b = e.target.closest('[data-svc]'); if (b) pickSvc(b.dataset.svc); };
-    $('#drChips', view).onclick = (e) => { const b = e.target.closest('[data-dr]'); if (b) pickDr(b.dataset.dr); };
     $('#f_fee', view).oninput = calc; $('#f_disc', view).oninput = calc;
     $('#f_paid', view).oninput = (e) => e.target.dataset.touched = '1';
     $$('[data-mode]', view).forEach(b => b.onclick = () => {
       st.reserve = b.dataset.mode === 'reserve'; $$('[data-mode]', view).forEach(x => x.classList.toggle('on', x === b));
-      $('#resBox', view).classList.toggle('hidden', !st.reserve); delete $('#f_paid', view).dataset.touched; calc(); loadToday();
+      $('#resBox', view).classList.toggle('hidden', !st.reserve); delete $('#f_paid', view).dataset.touched; calc(); loadToday(); drPick.refreshLoad(st.reserve ? dateOf($('#f_date', view)) : today());
     });
-    $('#f_date', view).addEventListener('change', loadToday);
+    $('#f_date', view).addEventListener('change', () => { loadToday(); drPick.refreshLoad(dateOf($('#f_date', view))); });
     // patient name typed for a new patient → search hint
     const save = async (btn, print) => busy(btn, async () => {
       const pv = formValues(f);
@@ -163,10 +163,11 @@ Pages.reception = {
       if (st.custom && !$('#cs_name', view).value.trim()) throw new Error('نام خدمت را بنویسید');
       const payload = {
         patient: { ...(st.patient ? { id: st.patient.id } : {}), full_name: pv.full_name, father_name: pv.father_name, sex, phone: pv.phone, address: pv.address,
-          ...(pv.age_years !== '' || pv.age_months !== '' ? { age_years: pv.age_years || 0, age_months: pv.age_months || 0 } : {}) },
+          emergency_name: pv.emergency_name, emergency_phone: pv.emergency_phone, insurance: pv.insurance, insurance_no: pv.insurance_no, tazkira: pv.tazkira,
+          ...(ageValue(f, 'rcAge') || {}) },
         service_id: st.svc?.id, service_name: st.custom ? $('#cs_name', view).value.trim() : undefined, save_service: st.custom && $('#cs_save', view).checked ? 1 : 0,
         doctor_id: st.dr?.id || null, fee: $('#f_fee', view).value, discount: $('#f_disc', view).value, paid: $('#f_paid', view).value, pay_method: $('#f_method', view).value,
-        note: $('#f_note', view).value, weight: pv.weight, reserve: st.reserve ? 1 : 0, visit_date: st.reserve ? dateOf($('#f_date', view)) : undefined, reserved_time: st.reserve ? $('#f_time', view).value : undefined
+        note: $('#f_note', view).value, weight: pv.weight, height: pv.height, reserve: st.reserve ? 1 : 0, visit_date: st.reserve ? dateOf($('#f_date', view)) : undefined, reserved_time: st.reserve ? $('#f_time', view).value : undefined
       };
       const v = await API.post('/api/visits/create', payload);
       toast(`ثبت شد — نوبت ${v.turn_no} · کد مریض ${v.patient_code}`, 'good');
@@ -198,7 +199,7 @@ Pages.visits = {
         <label class="check"><input type="checkbox" id="v_bal"> فقط باقی‌دار / بازپرداخت</label>
       </div>
       <div class="queueCols" id="qCols" style="margin-bottom:16px"></div>
-      <div class="card"><div class="tableWrap"><table class="t"><thead><tr><th>نوبت</th><th>رسید</th><th>کد مریض</th><th>نام / ولد</th><th>خدمت</th><th>داکتر</th><th>وضعیت</th><th>فیس</th><th>پرداخت</th><th>باقی</th><th></th></tr></thead><tbody id="vBody"></tbody></table></div><div class="sum" id="vSum"></div></div>`;
+      <div class="card"><div class="tableWrap"><table class="t"><thead><tr><th>نوبت</th><th>تاریخ</th><th>رسید</th><th>کد مریض</th><th>نام / ولد</th><th>خدمت</th><th>داکتر</th><th>وضعیت</th><th>فیس</th><th>پرداخت</th><th>باقی</th><th></th></tr></thead><tbody id="vBody"></tbody></table></div><div class="sum" id="vSum"></div></div>`;
     let rows = [];
     const load = async () => {
       const q = { limit: 3000 };
@@ -217,11 +218,11 @@ Pages.visits = {
       for (const v of rows.filter(r => r.status !== 'cancelled')) { const k = v.doctor_id ? doctorName({ title: v.doctor_title, name: v.doctor_name }) : v.service_name; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(v); }
       $('#qCols', view).innerHTML = [...groups.entries()].map(([k, list]) => `<div class="qCol"><h3><span>${esc(k)}</span><small class="muted">${list.filter(v => v.status === 'waiting').length} در انتظار · ${list.length} کل</small></h3>
         ${list.sort((a, b) => (a.turn_no || 0) - (b.turn_no || 0)).map(v => `<div class="qItem ${v.status}" data-id="${v.id}"><div class="qNo">${v.turn_no || '—'}</div><div class="grow"><b>${esc(v.full_name)}</b><small>ولد ${esc(v.father_name || '—')} · ${esc(v.patient_code)}${v.reserved_time ? ' · ساعت ' + esc(v.reserved_time) : ''}</small></div>${statusPill(VISIT_STATUS, v.status)}</div>`).join('')}</div>`).join('') || '';
-      $('#vBody', view).innerHTML = rows.map(v => `<tr data-id="${v.id}"><td class="c"><b>${v.turn_no || '—'}</b></td><td class="codeTag">${esc(v.visit_no)}</td><td class="codeTag">${esc(v.patient_code)}</td>
+      $('#vBody', view).innerHTML = rows.map(v => `<tr data-id="${v.id}"><td class="c"><b>${v.turn_no || '—'}</b></td><td class="nowrap">${fmtDate(v.visit_date)}${v.reserved_time ? ` <small class="muted ltr">${esc(v.reserved_time)}</small>` : ''}</td><td class="codeTag">${esc(v.visit_no)}</td><td class="codeTag">${esc(v.patient_code)}</td>
         <td><b>${esc(v.full_name)}</b> <small class="muted">ولد ${esc(v.father_name || '—')}</small></td><td>${esc(v.service_name)}</td><td>${esc(v.doctor_name || '—')}</td><td>${statusPill(VISIT_STATUS, v.status)}</td>
         <td>${money(v.net)}${v.doctor_discount ? ` <small class="pill violet">تخفیف داکتر ${money(v.doctor_discount)}</small>` : ''}</td><td>${money(v.paid)}</td>
         <td class="${v.balance > 0.001 ? 'neg' : v.balance < -0.001 ? 'pos' : ''}">${Math.abs(v.balance) > 0.001 ? (v.balance > 0 ? money(v.balance) : 'بازپرداخت ' + money(-v.balance)) : '—'}</td>
-        <td class="nowrap"><button class="btn sm" data-act="menu" data-id="${v.id}">عملیات ▾</button></td></tr>`).join('') || emptyRow(11);
+        <td class="nowrap"><button class="btn sm" data-act="menu" data-id="${v.id}">عملیات ▾</button></td></tr>`).join('') || emptyRow(12);
       const act = rows.filter(r => r.status !== 'cancelled');
       $('#vSum', view).innerHTML = `<span>تعداد: <b>${act.length}</b></span><span>فیس خالص: <b>${money(act.reduce((a, r) => a + r.net, 0))}</b></span><span>دریافت شده: <b>${money(act.reduce((a, r) => a + r.paid, 0))}</b></span><span>در انتظار: <b>${act.filter(r => r.status === 'waiting').length}</b></span><span>ویزیت شده: <b>${act.filter(r => r.status === 'done').length}</b></span>`;
     };
@@ -236,6 +237,8 @@ Pages.visits = {
           ${v.balance > 0.001 ? `<button class="btn success" data-a="pay">${icon('money')} دریافت باقی (${money(v.balance)})</button>` : ''}
           ${v.balance < -0.001 ? `<button class="btn" data-a="refund">${icon('money')} بازپرداخت ${money(-v.balance)}</button>` : ''}
           <button class="btn" data-a="edit">${icon('edit')} ویرایش فیس / داکتر</button>
+          <button class="btn" data-a="lab">${icon('flask')} آزمایش لابراتوار</button><button class="btn" data-a="account">${icon('cash')} حساب کامل مریض</button>
+          ${['waiting', 'in_visit'].includes(v.status) ? `<button class="btn" data-a="call">${icon('megaphone')} صدا زدن (TV)</button>` : ''}
           ${['waiting', 'reserved'].includes(v.status) ? `<button class="btn" data-a="noshow">نیامد</button><button class="btn dangerText" data-a="cancel">${icon('x')} لغو نوبت</button>` : ''}
         </div>` });
       const done = () => { m.close(); load(); };
@@ -249,6 +252,9 @@ Pages.visits = {
           if (a === 'noshow') { await API.post('/api/visits/status/' + v.id, { status: 'no_show' }); done(); }
           if (a === 'cancel') { const r = await promptDlg('لغو نوبت', { label: 'دلیل لغو' }); if (r !== null) { await API.post('/api/visits/status/' + v.id, { status: 'cancelled', reason: r }); if (v.paid > 0 && await confirmDlg(`فیس ${money(v.paid)} پس داده شود؟`)) await API.post('/api/visits/pay/' + v.id, { amount: -v.paid, note: 'لغو نوبت' }); done(); } }
           if (a === 'edit') { m.close(); editVisit(v, load); }
+          if (a === 'lab') { m.close(); go('rc-lab', { patient_id: v.patient_id, doctor_id: v.doctor_id }); }
+          if (a === 'account') { m.close(); patientAccountDlg(v.patient_id, load); }
+          if (a === 'call') { await API.post('/api/visits/call/' + v.id); toast('نوبت ' + v.turn_no + ' در صفحه نمایش اعلام شد', 'good'); done(); }
         })().catch(errToast);
       };
     };
@@ -347,12 +353,14 @@ function editPatient(p, after) {
     <label class="field"><span>نام <em>*</em></span><input name="full_name" value="${esc(p.full_name || '')}"></label>
     <label class="field"><span>ولد</span><input name="father_name" value="${esc(p.father_name || '')}"></label>
     <label class="field"><span>جنس</span><select name="sex">${opt([['M', 'مذکر'], ['F', 'مونث']], p.sex)}</select></label>
-    <label class="field"><span>تاریخ تولد</span>${dateInput('birth_date', p.birth_date)}</label>
-    <label class="field"><span>یا سن (سال)</span><input name="age_years" type="number" placeholder="${a ? a.y : ''}"></label>
+    <div class="field span2"><span>سن (سال / ماه / روز)</span>${ageInputHTML('epAge', p.birth_date)}</div>
+    <label class="field"><span>یا تاریخ تولد</span>${dateInput('birth_date', '', 'id="ep_birth"')}</label>
     <label class="field"><span>تلفن</span><input name="phone" class="ltr" value="${esc(p.phone || '')}"></label>
     <label class="field"><span>تذکره</span><input name="tazkira" value="${esc(p.tazkira || '')}"></label>
     <label class="field"><span>گروپ خون</span><select name="blood_group">${opt(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'], p.blood_group, { empty: '—' })}</select></label>
     <label class="field full"><span>آدرس</span><input name="address" value="${esc(p.address || '')}"></label>
+    <label class="field"><span>شخص تماس اضطراری</span><input name="emergency_name" value="${esc(p.emergency_name || '')}"></label><label class="field"><span>تلفن اضطراری</span><input name="emergency_phone" class="ltr" value="${esc(p.emergency_phone || '')}"></label>
+    <label class="field"><span>بیمه</span><input name="insurance" value="${esc(p.insurance || '')}"></label><label class="field"><span>شماره بیمه</span><input name="insurance_no" class="ltr" value="${esc(p.insurance_no || '')}"></label>
     ${full ? `<label class="field full"><span>حساسیت‌ها (Allergies)</span><input name="allergies" value="${esc(p.allergies || '')}"></label>
     <label class="field span2"><span>امراض مزمن / سابقه مریضی</span><textarea name="chronic_diseases">${esc(p.chronic_diseases || '')}</textarea></label>
     <label class="field span2"><span>سابقه قبلی (عملیات، بستری…)</span><textarea name="past_history">${esc(p.past_history || '')}</textarea></label>
@@ -360,35 +368,12 @@ function editPatient(p, after) {
     <label class="field span2"><span>دواهای فعلی</span><textarea name="current_medications">${esc(p.current_medications || '')}</textarea></label>` : ''}
     <label class="field full"><span>یادداشت</span><textarea name="notes">${esc(p.notes || '')}</textarea></label></div>`,
     foot: `<button class="btn primary" id="ep_ok">ذخیره</button><button class="btn" data-x>انصراف</button>` });
+  bindAgeInput(m.el, 'epAge');
+  const origAge = JSON.stringify(ageValue(m.el, 'epAge'));
   $('[data-x]', m.el).onclick = m.close;
   $('#ep_ok', m.el).onclick = () => busy($('#ep_ok', m.el), async () => {
     const v = formValues($('#epF', m.el)); if (p.id) v.id = p.id;
-    if (!v.age_years) delete v.age_years;
-    if (!v.birth_date) delete v.birth_date;
+    if (!v.birth_date) { delete v.birth_date; const av = ageValue(m.el, 'epAge'); if (av && JSON.stringify(av) !== origAge) Object.assign(v, av); }
     await API.save('patients', v); toast('ذخیره شد', 'good'); m.close(); after && after();
   }).catch(errToast);
 }
-
-// ================================================================ reception cash
-Pages['rc-cash'] = {
-  async render(view) {
-    view.innerHTML = `<div class="pageHead"><div><h1>صندوق پذیرش</h1><p>فیس‌های دریافت شده، بازپرداخت‌ها و خلاصه به تفکیک خدمت و داکتر.</p></div><div class="toolbar"><button class="btn" data-act="print">${icon('print')} چاپ</button></div></div>
-      <div class="filterBar"><label class="field"><span>از</span>${dateInput('from', today(), 'id="c_from"')}</label><label class="field"><span>تا</span>${dateInput('to', today(), 'id="c_to"')}</label></div>
-      <div class="grid g4" id="cK"></div><div class="grid g2" style="margin-top:16px"><div class="card"><h2>به تفکیک خدمت</h2><div id="cSvc"></div></div><div class="card"><h2>به تفکیک داکتر</h2><div id="cDr"></div></div></div>`;
-    let html = '';
-    const load = async () => {
-      const from = dateOf($('#c_from', view)), to = dateOf($('#c_to', view));
-      const [visits, pays] = await Promise.all([API.list('visits', { from, to, 'ne.status': 'cancelled', limit: 10000 }), API.list('visit_payments', { from, to, limit: 10000 })]);
-      const act = visits.filter(v => v.status !== 'reserved');
-      const recv = pays.filter(p => p.amount > 0).reduce((a, p) => a + p.amount, 0), ref = -pays.filter(p => p.amount < 0).reduce((a, p) => a + p.amount, 0);
-      $('#cK', view).innerHTML = kpi('تعداد مریضان', act.length, { ic: 'users' }) + kpi('دریافت فیس', money(recv), { ic: 'money', cls: 'good' }) + kpi('بازپرداخت / تخفیف داکتر', money(ref), { ic: 'percent', cls: 'warn' }) + kpi('صندوق خالص', money(recv - ref), { ic: 'wallet', cls: 'violet', sub: currency() });
-      const grp = (key) => { const g = new Map(); act.forEach(v => { const k = key(v) || '—'; const o = g.get(k) || { n: 0, s: 0 }; o.n++; o.s += v.net; g.set(k, o); }); return [...g.entries()].sort((a, b) => b[1].s - a[1].s); };
-      const tbl = (rows) => `<table class="t"><thead><tr><th>نام</th><th>تعداد</th><th>فیس</th></tr></thead><tbody>${rows.map(([k, o]) => `<tr><td>${esc(k)}</td><td>${o.n}</td><td>${money(o.s)}</td></tr>`).join('') || emptyRow(3)}</tbody></table>`;
-      $('#cSvc', view).innerHTML = tbl(grp(v => v.service_name)); $('#cDr', view).innerHTML = tbl(grp(v => v.doctor_name));
-      html = `<p>بازه: ${fmtDate(from)} تا ${fmtDate(to)}</p>${$('#cK', view).innerText.replace(/\n/g, ' · ')}<h3>خدمات</h3>${$('#cSvc', view).innerHTML}<h3>داکتران</h3>${$('#cDr', view).innerHTML}`;
-    };
-    $$('#c_from, #c_to', view).forEach(el => el.addEventListener('change', load));
-    actions(view, { print: () => previewDoc(reportDocHTML('گزارش صندوق پذیرش', html), { title: 'صندوق پذیرش' }) });
-    await load();
-  }
-};

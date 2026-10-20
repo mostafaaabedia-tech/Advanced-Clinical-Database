@@ -209,12 +209,17 @@ function ageParts(birth, at = new Date()) {
   if (d < 0) { m--; d += 30; } if (m < 0) { y--; m += 12; }
   return { y, m, d, days: Math.floor((a - b) / 86400000) };
 }
+// children (under 15) show years and months, babies months and days
 function ageLabel(birth) {
   const p = ageParts(birth); if (!p) return '—';
-  if (p.y >= 2) return `${p.y} سال`;
+  if (p.y >= 15) return `${p.y} سال`;
   if (p.y >= 1) return `${p.y} سال${p.m ? ' و ' + p.m + ' ماه' : ''}`;
-  if (p.m >= 1) return `${p.m} ماه`;
+  if (p.m >= 1) return `${p.m} ماه${p.d ? ' و ' + p.d + ' روز' : ''}`;
   return `${Math.max(0, p.days)} روز`;
+}
+function ageGroup(birth) {
+  const p = ageParts(birth); if (!p) return '';
+  if (p.days <= 28) return 'نوزاد'; if (p.y < 2) return 'شیرخوار'; if (p.y < 15) return 'طفل'; if (p.y >= 60) return 'سالمند'; return 'بزرگسال';
 }
 const sexFa = s => s === 'F' ? 'مونث' : 'مذکر';
 
@@ -415,3 +420,136 @@ function patientSearch(input, onPick) {
 }
 // quick numeric input that selects on focus
 document.addEventListener('focusin', (e) => { if (e.target.matches && e.target.matches('input[type=number], input.selAll')) setTimeout(() => { try { e.target.select(); } catch (_) { } }, 0); });
+
+
+// ---------------- theme: light / dark / auto + accent colour (per computer) ----------------
+const Theme = {
+  mode() { return localGet('theme', 'auto'); },
+  dark() { const m = this.mode(); return m === 'dark' || (m === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches); },
+  apply() {
+    const dark = this.dark();
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    const st = STATIONS[App.station] || STATIONS.admin;
+    let accent = localGet('accent_' + (App.station || 'browser'), '') || App.settings['color_' + (App.station || 'admin')] || '';
+    if (!/^#[0-9a-f]{6}$/i.test(accent)) accent = '';
+    setAccent(accent || st.color, accent ? mixColor(accent, '#ffffff', .12) : st.color2);
+    if (window.Chart) { Chart.defaults.color = dark ? '#cbd5e1' : '#475569'; if (typeof CH !== 'undefined') { CH.grid = dark ? '#273244' : '#eef1f5'; CH.text = dark ? '#cbd5e1' : '#475569'; CH.surface = dark ? '#111827' : '#ffffff'; } }
+    const b = document.getElementById('themeBtn'); if (b) b.innerHTML = icon(dark ? 'sun' : 'moon', 16);
+  },
+  cycle() { const order = ['light', 'dark', 'auto']; const m = order[(order.indexOf(this.mode()) + 1) % 3]; localSet('theme', m); this.apply(); toast({ light: 'حالت روشن', dark: 'حالت تاریک', auto: 'خودکار (مطابق ویندوز)' }[m]); if (App.page && Pages[App.page]) reloadPage(); }
+};
+function mixColor(hex, to, t) { return '#' + [1, 3, 5].map(i => { const a = parseInt(hex.substr(i, 2), 16), b = parseInt(to.substr(i, 2), 16); return Math.round(a + (b - a) * t).toString(16).padStart(2, '0'); }).join(''); }
+function setAccent(c1, c2) {
+  const r = document.documentElement.style; const dark = document.documentElement.dataset.theme === 'dark';
+  r.setProperty('--brand', c1); r.setProperty('--brand-2', c2 || c1);
+  r.setProperty('--brand-soft', dark ? mixColor(c2 || c1, '#0f172a', .78) : mixColor(c2 || c1, '#ffffff', .9));
+  r.setProperty('--brand-ink', dark ? mixColor(c1, '#ffffff', .55) : mixColor(c1, '#000000', .25));
+  r.setProperty('--brand-dark', mixColor(c1, '#000000', .3));
+}
+try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => Theme.apply()); } catch (_) { }
+ICONS.sun = 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4';
+ICONS.moon = 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z';
+ICONS.bed = 'M2 4v16M2 8h18a2 2 0 0 1 2 2v10M2 17h20M6 8v9';
+ICONS.tv = 'M2 7h20v12H2zM17 2l-5 5-5-5';
+ICONS.cash = 'M2 6h20v12H2zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 12h.01M18 12h.01';
+ICONS.cart = 'M9 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM20 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6';
+ICONS.megaphone = 'M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7M18.4 5.6a9 9 0 0 1 0 12.8';
+
+// ---------------- age input: years / months / days (children & newborns) ----------------
+function ageInputHTML(prefix, birth, { compact = false } = {}) {
+  const p = ageParts(birth) || {};
+  const v = (x) => (birth ? x : '');
+  return `<div class="ageIn ${compact ? 'compact' : ''}" data-age="${prefix}">
+    <label><input type="number" min="0" max="120" data-a="y" value="${esc(v(p.y ?? ''))}" placeholder="0"><span>سال</span></label>
+    <label><input type="number" min="0" max="11" data-a="m" value="${esc(birth && p.y < 15 ? p.m : '')}" placeholder="0"><span>ماه</span></label>
+    <label><input type="number" min="0" max="31" data-a="d" value="${esc(birth && p.y < 1 ? p.d : '')}" placeholder="0"><span>روز</span></label>
+    <small class="ageHint"></small></div>`;
+}
+function bindAgeInput(root, prefix) {
+  const box = $(`[data-age="${prefix}"]`, root); if (!box) return;
+  const upd = () => { const a = ageValue(root, prefix); const hint = $('.ageHint', box); if (!a) { hint.textContent = ''; return; } const b = birthFromAgeParts(a.age_years, a.age_months, a.age_days); hint.textContent = `${ageGroup(b)} · ${ageLabel(b)}`; };
+  box.addEventListener('input', upd); upd();
+}
+function ageValue(root, prefix) {
+  const box = $(`[data-age="${prefix}"]`, root); if (!box) return null;
+  const g = (k) => $(`[data-a="${k}"]`, box).value;
+  if (g('y') === '' && g('m') === '' && g('d') === '') return null;
+  return { age_years: Number(g('y')) || 0, age_months: Number(g('m')) || 0, age_days: Number(g('d')) || 0 };
+}
+function setAgeInput(root, prefix, birth) {
+  const box = $(`[data-age="${prefix}"]`, root); if (!box) return;
+  const p = ageParts(birth);
+  $('[data-a="y"]', box).value = p ? p.y : ''; $('[data-a="m"]', box).value = p && p.y < 15 ? p.m : ''; $('[data-a="d"]', box).value = p && p.y < 1 ? p.d : '';
+  box.dispatchEvent(new Event('input'));
+}
+function birthFromAgeParts(y, m, d) { const x = new Date(); x.setHours(12, 0, 0, 0); x.setFullYear(x.getFullYear() - (Number(y) || 0)); x.setMonth(x.getMonth() - (Number(m) || 0)); x.setDate(x.getDate() - (Number(d) || 0)); return isoDate(x); }
+function bmi(w, h) { w = Number(w); h = Number(h); if (!w || !h) return null; return Math.round(w / Math.pow(h / 100, 2) * 10) / 10; }
+
+// ---------------- doctor picker: dropdown grouped by department, with search, load and "new doctor" ----------------
+function doctorPickerHTML(id, { allowNone = true, placeholder = 'انتخاب داکتر…' } = {}) {
+  return `<div class="drPick" id="${id}"><button type="button" class="drPickBtn"><span class="drPickVal muted">${esc(placeholder)}</span><span class="caret">▾</span></button>
+    <div class="drPickPop hidden"><input class="drPickQ" placeholder="جستجوی داکتر، بخش یا نوع کار…"><div class="drPickList"></div>
+    <div class="drPickFoot">${allowNone ? '<button type="button" class="btn sm ghost" data-none>بدون داکتر</button>' : ''}${isRole('reception') ? `<button type="button" class="btn sm" data-newdr>${icon('plus', 13)} داکتر جدید</button>` : ''}</div></div></div>`;
+}
+function bindDoctorPicker(root, id, { onPick, date, selected } = {}) {
+  const box = $('#' + id, root); if (!box) return null;
+  let load = [], cur = selected ? Number(selected) : null;
+  const pop = $('.drPickPop', box), list = $('.drPickList', box), q = $('.drPickQ', box);
+  const label = (d) => d ? `<b>${esc(doctorName(d))}</b> <small class="muted">${esc([d.department_name, d.work_type].filter(Boolean).join(' · '))}</small>` : '<span class="muted">بدون داکتر</span>';
+  const set = (did, fire = true) => {
+    cur = did ? Number(did) : null; const d = App.doctors.find(x => x.id === cur);
+    $('.drPickVal', box).innerHTML = d ? label(d) : (did === '' || did === null ? '<span class="muted">بدون داکتر</span>' : '');
+    $('.drPickVal', box).classList.toggle('muted', !d);
+    pop.classList.add('hidden'); if (fire && onPick) onPick(d || null);
+  };
+  const draw = () => {
+    const s = q.value.trim().toLowerCase();
+    const docs = App.doctors.filter(d => d.active && (!s || [d.name, d.title, d.specialty, d.department_name, d.work_type].some(x => String(x || '').toLowerCase().includes(s))));
+    const groups = new Map(); docs.forEach(d => { const k = d.department_name || 'سایر'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(d); });
+    list.innerHTML = [...groups.entries()].map(([g, ds]) => `<div class="drPickGroup">${esc(g)}</div>${ds.map(d => { const l = load.find(x => x.id === d.id) || {}; return `<div class="drPickItem ${d.id === cur ? 'on' : ''} ${l.works_today === false ? 'off' : ''}" data-id="${d.id}">
+      <div class="grow"><b>${esc(doctorName(d))}</b><small>${esc([d.work_type, d.specialty].filter(Boolean).join(' · '))}${d.room ? ' · اطاق ' + esc(d.room) : ''}</small></div>
+      <div class="drPickMeta">${l.works_today === false ? '<span class="pill bad">امروز نیست</span>' : ''}${l.max_patients ? `<span class="pill ${l.booked >= l.max_patients ? 'bad' : ''}">${l.booked}/${l.max_patients}</span>` : l.booked ? `<span class="pill">${l.booked} نوبت</span>` : ''}${l.waiting ? `<span class="pill warn">${l.waiting} منتظر</span>` : ''}<small class="muted">${money(d.visit_fee)}</small></div></div>`; }).join('')}`).join('') || '<div class="empty" style="padding:12px">داکتری پیدا نشد</div>';
+  };
+  const refreshLoad = async (dt) => { try { load = await API.get('/api/doctor-load', { date: dt || date || today() }); draw(); } catch (_) { } };
+  $('.drPickBtn', box).onclick = () => { const open = pop.classList.contains('hidden'); $$('.drPickPop').forEach(p => p.classList.add('hidden')); if (open) { pop.classList.remove('hidden'); q.value = ''; draw(); refreshLoad(); setTimeout(() => q.focus(), 20); } };
+  q.addEventListener('input', draw);
+  q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const f = $('.drPickItem', list); if (f) { e.preventDefault(); set(f.dataset.id); } } if (e.key === 'Escape') pop.classList.add('hidden'); });
+  list.addEventListener('click', (e) => { const it = e.target.closest('.drPickItem'); if (it) set(it.dataset.id); });
+  const none = $('[data-none]', box); if (none) none.onclick = () => set('');
+  const nd = $('[data-newdr]', box); if (nd) nd.onclick = () => { pop.classList.add('hidden'); doctorDialog(null, async (newId) => { await loadBootstrap(); set(newId); }); };
+  document.addEventListener('mousedown', (e) => { if (!box.contains(e.target)) pop.classList.add('hidden'); });
+  if (selected !== undefined) set(selected, false);
+  return { set, get: () => cur, refreshLoad };
+}
+// add / edit a doctor (name, title, department, type of work, fee, room, letterhead lines, weekly schedule)
+function doctorDialog(d, after) {
+  d = d || { active: 1, on_letterhead: 0, letterhead_side: 'right', color: '#0f7a3a', visit_fee: 0, sort: (App.doctors.length || 0) + 1, work_type: 'متخصص' };
+  const deps = App.departments || [];
+  const WD = ['یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه', 'شنبه'];
+  const order = [6, 0, 1, 2, 3, 4, 5];
+  const m = modal({ title: d.id ? 'ویرایش داکتر' : 'داکتر جدید', size: 'wide', body: `<div class="formGrid" id="drF">
+    <label class="field"><span>عنوان (دوکتور، پوهنمل دوکتور…)</span><input name="title" value="${esc(d.title || '')}" list="drTitles"></label><label class="field"><span>نام <em>*</em></span><input name="name" value="${esc(d.name || '')}"></label>
+    <label class="field"><span>بخش</span><div class="inputGroup"><select name="department_id" id="dr_dep">${opt(deps.map(x => [x.id, x.name]), d.department_id, { empty: '—' })}</select><button type="button" class="btn" id="dr_newdep" title="بخش جدید">${icon('plus', 14)}</button></div></label>
+    <label class="field"><span>نوع کار</span><input name="work_type" list="drWork" value="${esc(d.work_type || '')}"></label>
+    <label class="field span2"><span>تخصص (کوتاه)</span><input name="specialty" value="${esc(d.specialty || '')}"></label>
+    <label class="field"><span>فیس ویزیت OPD</span><input name="visit_fee" type="number" value="${esc(d.visit_fee)}"></label><label class="field"><span>اطاق / شماره اتاق</span><input name="room" value="${esc(d.room || '')}"></label>
+    <label class="field"><span>تلفن</span><input name="phone" class="ltr" value="${esc(d.phone || '')}"></label>
+    <label class="field full"><span>سطرهای زیر نام روی سرخط نسخه (هر سطر جدا)</span><textarea name="header_lines" rows="3">${esc(d.header_lines || '')}</textarea></label>
+    <label class="field"><span>سمت روی سرخط</span><select name="letterhead_side">${opt([['right', 'راست'], ['left', 'چپ']], d.letterhead_side)}</select></label><label class="field"><span>رنگ نام</span><input name="color" type="color" value="${esc(d.color || '#0f7a3a')}"></label>
+    <label class="field"><span>ترتیب</span><input name="sort" type="number" value="${esc(d.sort || 0)}"></label>
+    <label class="check"><input type="checkbox" name="on_letterhead" ${d.on_letterhead ? 'checked' : ''}> روی سرخط نسخه</label><label class="check"><input type="checkbox" name="active" ${d.active ? 'checked' : ''}> فعال</label></div>
+    <div class="secTitle">${icon('calendar', 15)} اوقات کاری هفته <small class="muted">— خالی = همه روزها</small></div>
+    <table class="t" id="drSch"><thead><tr><th>روز</th><th>کار می‌کند</th><th>از ساعت</th><th>تا ساعت</th><th>حداکثر مریض</th></tr></thead><tbody>${order.map(w => `<tr data-w="${w}"><td>${WD[w]}</td><td><input type="checkbox" data-on></td><td><input type="time" data-s></td><td><input type="time" data-e></td><td><input type="number" data-max style="width:90px"></td></tr>`).join('')}</tbody></table>
+    ${datalist('drWork', listSetting('doctor_work_types'))}${datalist('drTitles', ['دوکتور', 'دوکتورس', 'پوهنمل دوکتور', 'پوهنیار دوکتورس', 'پوهندوی دوکتور', 'پوهاند دوکتور', 'قابله'])}`,
+    foot: `<button class="btn primary" id="dr_ok">ذخیره</button><button class="btn" data-x>انصراف</button>` });
+  (async () => { if (!d.id) return; const rows = await API.list('doctor_schedules', { 'eq.doctor_id': d.id }); rows.forEach(r => { const tr = $(`#drSch tr[data-w="${r.weekday}"]`, m.el); if (!tr) return; $('[data-on]', tr).checked = true; $('[data-s]', tr).value = r.start_time || ''; $('[data-e]', tr).value = r.end_time || ''; $('[data-max]', tr).value = r.max_patients || ''; }); })().catch(() => { });
+  $('#dr_newdep', m.el).onclick = async () => { const name = await promptDlg('بخش جدید', { label: 'نام بخش (مثلاً: جلدی، دندان، چشم)' }); if (!name) return; const id = await API.save('medical_departments', { name, sort: deps.length + 1 }); await loadBootstrap(); $('#dr_dep', m.el).innerHTML = opt((App.departments || []).map(x => [x.id, x.name]), id, { empty: '—' }); };
+  $('[data-x]', m.el).onclick = m.close;
+  $('#dr_ok', m.el).onclick = () => busy($('#dr_ok', m.el), async () => {
+    const v = formValues($('#drF', m.el)); if (d.id) v.id = d.id; if (!v.name) throw new Error('نام الزامی است');
+    const id = await API.save('doctors', v);
+    const rows = $$('#drSch tr[data-w]', m.el).filter(tr => $('[data-on]', tr).checked).map(tr => ({ weekday: Number(tr.dataset.w), start_time: $('[data-s]', tr).value, end_time: $('[data-e]', tr).value, max_patients: $('[data-max]', tr).value }));
+    await API.post('/api/doctors/schedule/' + id, { rows });
+    toast('ذخیره شد', 'good'); m.close(); after && after(id);
+  }).catch(errToast);
+}

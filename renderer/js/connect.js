@@ -6,6 +6,7 @@
   const st = q.get('station') || (window.native && window.native.station) || '';
   const $ = (s) => document.querySelector(s);
   const esc = (x) => String(x ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  try { const m = localStorage.getItem('acdb_theme') || 'auto'; document.documentElement.dataset.theme = m === 'dark' || (m === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; } catch (_) { }
   $('#st').textContent = 'ایستگاه: ' + (names[st] || st);
   if (colors[st]) { document.documentElement.style.setProperty('--brand', colors[st]); document.documentElement.style.setProperty('--brand-2', colors[st]); }
   if (q.get('msg')) { $('#msg').textContent = q.get('msg'); $('#msg').classList.remove('hidden'); }
