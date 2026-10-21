@@ -1,6 +1,6 @@
 // Advanced Clinical Database — SQLite schema
 // One database (on the Admin / server PC) shared by every station over the local network.
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const TABLES = `
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
@@ -440,6 +440,25 @@ CREATE TABLE IF NOT EXISTS admission_payments (
   amount REAL NOT NULL, method TEXT DEFAULT 'cash', note TEXT, station TEXT,
   created_by INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
+-- v3: laboratory reception types (free / insurance contracts), outside referring doctors, reagent kits
+CREATE TABLE IF NOT EXISTS lab_reception_types (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, code TEXT,
+  price_basis TEXT NOT NULL DEFAULT 'free',              -- free | insurance
+  patient_pct REAL NOT NULL DEFAULT 100,                 -- patient share (franchise) %; the rest is the organisation's share
+  increase_pct REAL NOT NULL DEFAULT 0, discount_pct REAL NOT NULL DEFAULT 0,
+  max_tests INTEGER, required_fields TEXT, org_name TEXT, notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS lab_referrers (
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL, council_no TEXT, specialty TEXT, phone TEXT, clinic TEXT,
+  discount_pct REAL NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS lab_kits (
+  id INTEGER PRIMARY KEY, test_id INTEGER NOT NULL REFERENCES lab_tests(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, lot_no TEXT, expiry TEXT, method TEXT, company TEXT, active INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
 
 `;
 
@@ -475,10 +494,14 @@ CREATE VIEW v_prescriptions AS
 
 DROP VIEW IF EXISTS v_lab_requests;
 CREATE VIEW v_lab_requests AS
-  SELECT r.*, p.code AS patient_code, p.full_name, p.father_name, p.sex, p.birth_date, p.phone,
-    d.name AS doctor_name, (r.net - r.paid) AS balance,
-    (SELECT GROUP_CONCAT(i.name, ' · ') FROM lab_request_items i WHERE i.request_id = r.id) AS tests
-  FROM lab_requests r JOIN patients p ON p.id = r.patient_id LEFT JOIN doctors d ON d.id = r.doctor_id;
+  SELECT r.*, p.code AS patient_code, p.full_name, p.father_name, p.sex, p.birth_date, p.phone, p.tazkira,
+    COALESCE(d.name, rf.name, r.referrer) AS doctor_name, (r.net - r.paid) AS balance,
+    rt.name AS reception_type, rf.council_no AS referrer_council, COALESCE(rf.specialty, md.name) AS referrer_specialty,
+    (SELECT GROUP_CONCAT(i.name, ' · ') FROM lab_request_items i WHERE i.request_id = r.id) AS tests,
+    (SELECT COUNT(*) FROM lab_request_items i WHERE i.request_id = r.id) AS test_count
+  FROM lab_requests r JOIN patients p ON p.id = r.patient_id LEFT JOIN doctors d ON d.id = r.doctor_id
+  LEFT JOIN medical_departments md ON md.id = d.department_id
+  LEFT JOIN lab_referrers rf ON rf.id = r.referrer_id LEFT JOIN lab_reception_types rt ON rt.id = r.reception_type_id;
 
 DROP VIEW IF EXISTS v_admissions;
 CREATE VIEW v_admissions AS

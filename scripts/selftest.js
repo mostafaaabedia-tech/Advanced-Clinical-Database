@@ -121,6 +121,33 @@ const ok = (m) => console.log('  ✓', m);
   await call(L, 'POST', '/api/lab/receive/' + walk.id, {}); await call(L, 'POST', '/api/lab/cancel/' + walk.id, { reason: 'test' }); ok('lab cancel returns materials');
   await assert.rejects(call(R, 'POST', '/api/lab/results/' + rec.id, { results: [] }), /دسترسی/); ok('reception cannot enter lab results');
 
+  // laboratory v3: reception types (insurance share), referrers, answer date, kits with alarm/critical ranges, re-flagging, statistics
+  const cat3 = await call(L, 'GET', '/api/lab/catalog');
+  const ins = cat3.reception_types.find(x => x.code === 'INS');
+  await call(L, 'POST', '/api/save/lab_reception_types', { id: ins.id, active: 1, required_fields: '[]' });
+  await call(L, 'POST', '/api/lab/test/save', { id: hb.id, price_ins: 200 });
+  const refId = await call(L, 'POST', '/api/save/lab_referrers', { name: 'دوکتور بیرونی', council_no: 'MC-77', specialty: 'داخله' });
+  const iw = await call(L, 'POST', '/api/lab/walkin', { patient: { full_name: 'بیمه‌شده', sex: 'F', age_years: 30, tazkira: '1234' }, test_ids: [hb.id], reception_type_id: ins.id, referrer_id: refId, fasting: 'fast', clinical_notes: 'anemia?', urgent: 0 });
+  assert.equal(iw.subtotal, 200); assert.equal(iw.org_share, 140); assert.equal(iw.net, 60); ok('insurance reception: price 200, organisation 140, patient pays 60');
+  const iwr = await call(L, 'POST', '/api/lab/receive/' + iw.id, { paid: 0 });
+  assert.ok(iwr.answer_date >= srv.ops.today()); assert.equal(iwr.doctor_name, 'دوکتور بیرونی'); ok('answer date ' + iwr.answer_date + ', outside referrer kept');
+  const rep1 = await call(L, 'GET', `/api/lab/repeat-check?patient_id=${iw.patient_id}&test_ids=${hb.id}`); assert.equal(rep1.length, 1); ok('same-day repeated test detected');
+  const kit = await call(L, 'POST', '/api/lab/kit/save', { test_id: hb.id, name: 'Pars Azmun', lot_no: 'L-55', expiry: '2027-06-30', method: 'Photometric', active: 1, copy_ranges_from: 0 });
+  const tsave = (await call(L, 'GET', '/api/lab/catalog')).ranges.filter(r => r.test_id === hb.id && r.kit_id === kit.id);
+  assert.ok(tsave.length > 0); ok(`kit ${kit.name} lot ${kit.lot_no} active with ${tsave.length} copied ranges`);
+  await call(L, 'POST', '/api/lab/test/save', { id: hb.id, possible_low: 1, possible_high: 25, ranges: [{ sex: 'A', kit_id: kit.id, low: 12, high: 16, crit_low: 6, crit_high: 20 }] });
+  await assert.rejects(call(L, 'POST', '/api/lab/results/' + iw.id, { results: [{ test_id: hb.id, value: '40' }] }), /محدوده ممکن/); ok('value outside the possible range rejected');
+  const r3 = await call(L, 'POST', '/api/lab/results/' + iw.id, { results: [{ test_id: hb.id, value: '5', flag: 'L' }], status: 'completed' });
+  assert.equal(r3.tests.find(t => t.id === hb.id).kit.lot_no, 'L-55'); assert.ok(r3.checked_by_name); ok('result stored with kit lot, checked by ' + r3.checked_by_name);
+  const ap = await call(L, 'POST', '/api/lab/apply-ranges', { test_id: hb.id, from: srv.ops.today(), to: srv.ops.today() });
+  const r4 = await call(L, 'GET', '/api/lab/req/x?id=' + iw.id); assert.equal(r4.results.find(x => x.test_id === hb.id).flag, 'LL'); ok(`ranges re-applied to ${ap.changed} result(s): 5 g/dL → LL (critical)`);
+  const st = await call(L, 'GET', `/api/lab/stats?from=${srv.ops.today()}&to=${srv.ops.today()}&billed=all`);
+  assert.ok(st.totals.count >= 3 && st.totals.org_share >= 140 && st.byHour.length >= 1); ok(`patient statistics: ${st.totals.count} receptions, organisation share ${st.totals.org_share}, debtors ${st.totals.balance}`);
+  const di = await call(L, 'GET', `/api/lab/doctor-income?from=${srv.ops.today()}&to=${srv.ops.today()}`);
+  assert.ok(di.rows.find(x => x.name === 'دوکتور بیرونی' && x.council_no === 'MC-77')); ok('referring doctor income: ' + di.rows.map(x => `${x.name} ${x.income}`).join(' · '));
+  const prevReq = await call(L, 'POST', '/api/lab/walkin', { patient_id: iw.patient_id, test_ids: [hb.id] });
+  assert.equal(prevReq.prev[hb.id][0].value, '5'); ok('previous answers (Prev Res) shown for the next request');
+
   // deposits, in-patients (beds), day accounts, cash close
   await call(R, 'POST', '/api/cashier/deposit', { patient_id: v.patient_id, amount: 1000 });
   const board = await call(R, 'GET', '/api/ipd/board'); const bed = board[0].beds[0];

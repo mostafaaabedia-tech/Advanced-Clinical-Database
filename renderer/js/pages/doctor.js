@@ -9,6 +9,8 @@ async function loadLabCatalog(force) {
   c.deptById = new Map(c.departments.map(d => [d.id, d]));
   c.components = new Map(); c.panel_items.forEach(p => { if (!c.components.has(p.panel_id)) c.components.set(p.panel_id, []); c.components.get(p.panel_id).push(p.test_id); });
   c.ranges = c.ranges.reduce((m, r) => { if (!m.has(r.test_id)) m.set(r.test_id, []); m.get(r.test_id).push(r); return m; }, new Map());
+  c.kits = c.kits || []; c.reception_types = c.reception_types || []; c.referrers = c.referrers || [];
+  c.rtById = new Map(c.reception_types.map(x => [x.id, x]));
   return (LabCat = c);
 }
 const QUICK_TESTS = ['CBC', 'ESR', 'CRP', 'GLUF', 'GLUR', 'HBA1C', 'URINE', 'STOOL', 'LFT', 'RFT', 'LIPID', 'TSH', 'TFT', 'HBSAG', 'HCV', 'HIV', 'WIDAL', 'MP', 'HPYLAG', 'BGRH', 'BHCG', 'UPT', 'VITD', 'FERR', 'UA', 'RF', 'ASO'];

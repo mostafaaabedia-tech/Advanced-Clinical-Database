@@ -177,3 +177,36 @@ tr.cmtRow input { width: 100%; font-size: 12px; padding: 5px 8px; border: 1px da
 .rangeGrid td.nowrap { white-space: nowrap; }
 .rangeGrid td.nowrap input, .rangeGrid td.nowrap select { display: inline-block; width: 68px !important; margin-inline-end: 4px; }
 .rangeGrid td select[data-k="sex"] { width: 82px !important; }
+
+/* lab results: previous answers, danger range, impossible values */
+table.res th.prevC, table.res td.prevC { font-size: 11.5px; color: var(--muted); text-align: center; white-space: nowrap; background: var(--surface-2); border-inline-start: 1px solid var(--line); }
+table.res td.prevC.f-H, table.res td.prevC.f-HH { color: #b42318; } table.res td.prevC.f-L, table.res td.prevC.f-LL { color: #175cd3; }
+table.res tr.alarm td.nm::after { content: ' ⚠'; color: #b45309; }
+table.res tr.alarm { background: #fff7ed; }
+html[data-theme="dark"] table.res tr.alarm { background: #2b1d0c; }
+table.res input.impossible { border-color: #dc2626 !important; box-shadow: 0 0 0 2px rgba(220, 38, 38, .25); }
+.labInfo span { white-space: nowrap; }
+.wideRange td input[type=number] { width: 66px !important; }
+.wideRange td input[data-k="text"] { width: 120px; }
+.wideRange th { text-align: center; font-size: 11.5px; white-space: nowrap; }
+
+/* lab report: boxed departments, arrows, coloured names, differential side column, flags line */
+.labDoc2 .lbf { letter-spacing: var(--lls, 0); }
+.labDoc2 .rSec { border: 1px solid #b9c6d3; border-radius: 6px; padding: 0 0 1mm; overflow: hidden; }
+.labDoc2.grid-none .rSec, .labDoc2.grid-lines .rSec { border: 0; }
+.labDoc2 .rSec.shade table.rt2 tbody tr:nth-child(even) td { background: #f2f5f9; }
+.labDoc2 .ar { font-size: .85em; margin-inline-end: 3px; } .labDoc2 .ar.up { color: #d92d20; } .labDoc2 .ar.dn { color: #1d4ed8; }
+.labDoc2 td.n-abn { color: #d92d20; font-weight: 700; } .labDoc2 td.n-low { color: #1d4ed8; font-weight: 700; }
+.labDoc2 tr.pnl td { font-weight: 700; color: #0b3a63; background: #eef3f8 !important; }
+.labDoc2 .withSide { display: flex; gap: 0; align-items: flex-start; }
+.labDoc2 .withSide > table.rt2:first-child { flex: 1; }
+.labDoc2 table.rt2.sideT { width: 36%; border-inline-start: 2px solid #b9c6d3; }
+.labDoc2 table.rt2.sideT td.v { text-align: right; }
+.labDoc2 .kitL { font-size: .78em; color: #667085; font-weight: 400; }
+.labDoc2 .span3 { grid-column: 1 / -1; }
+.labDoc2 .flagsRow { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: .92em; border-top: 1px dashed #aaa; padding-top: 3px; margin-top: 2px; }
+.labDoc2 .flagsRow .cn { flex: 1; min-width: 40mm; }
+.labDoc2 .flagsRow svg { height: 7mm; width: auto; }
+.rcAnswer { border: 1.5px solid #000; border-radius: 4px; text-align: center; padding: 1mm; margin: 1.5mm 0; font-size: 12px; }
+.tubeLabel .tlUrg { background: #000; color: #fff; padding: 0 3px; border-radius: 2px; font-size: 8px; }
+.tubeLabel .tlLab { font-size: 7px; text-align: center; white-space: nowrap; overflow: hidden; }

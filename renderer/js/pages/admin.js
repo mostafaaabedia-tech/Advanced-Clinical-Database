@@ -212,8 +212,28 @@ Pages.settings = {
         <label class="field"><span>جای نتیجه در خانه</span><select name="lab_result_align">${opt([['left', 'چپ'], ['center', 'وسط'], ['right', 'راست']], s.lab_result_align || 'left')}</select></label>
         <label class="field"><span>معلومات مریض بالای راپور</span><select name="lab_patient_lang">${opt([['fa', 'فارسی (راست به چپ)'], ['en', 'انگلیسی']], s.lab_patient_lang || 'fa')}</select></label>
         <label class="check"><input type="checkbox" name="lab_show_print_time" ${s.lab_show_print_time === '1' ? 'checked' : ''}> تاریخ و ساعت چاپ پایین راپور</label>
-        <label class="check"><input type="checkbox" name="lab_show_signature" ${s.lab_show_signature !== '0' ? 'checked' : ''}> جای امضا</label></div>
-        <div class="secTitle">لیبل تیوب نمونه</div><div class="formGrid"><label class="field"><span>عرض (mm)</span><input name="lab_label_w" type="number" value="${esc(s.lab_label_w || 50)}"></label><label class="field"><span>ارتفاع (mm)</span><input name="lab_label_h" type="number" value="${esc(s.lab_label_h || 25)}"></label><label class="field"><span>تعداد از هر لیبل</span><input name="lab_label_copies" type="number" value="${esc(s.lab_label_copies || 1)}"></label></div>
+        <label class="check"><input type="checkbox" name="lab_show_signature" ${s.lab_show_signature !== '0' ? 'checked' : ''}> جای امضا</label>
+        <label class="field"><span>فاصله حروف (px)</span><input name="lab_letter_spacing" type="number" step="0.1" value="${esc(s.lab_letter_spacing || 0)}"></label>
+        <label class="field"><span>امضای چپ</span><input name="lab_sign_left" class="en" value="${esc(s.lab_sign_left || 'Lab Technician')}"></label><label class="field"><span>امضای راست</span><input name="lab_sign_right" class="en" value="${esc(s.lab_sign_right || 'Lab in charge')}"></label>
+        <label class="check"><input type="checkbox" name="lab_arrows" ${s.lab_arrows !== '0' ? 'checked' : ''}> فلش ▲▼ کنار نتیجه غیر نارمل</label>
+        <label class="check"><input type="checkbox" name="lab_color_names" ${s.lab_color_names !== '0' ? 'checked' : ''}> نام آزمایش غیر نارمل رنگی (سرخ / آبی)</label>
+        <label class="check"><input type="checkbox" name="lab_row_shade" ${s.lab_row_shade !== '0' ? 'checked' : ''}> سطرها یک در میان رنگی</label>
+        <label class="check"><input type="checkbox" name="lab_diff_side" ${s.lab_diff_side !== '0' ? 'checked' : ''}> Differential در ستون کنار CBC</label>
+        <label class="check"><input type="checkbox" name="lab_flags_box" ${s.lab_flags_box !== '0' ? 'checked' : ''}> Fast / Non Fast / Urgent / Clinical Notes در سر راپور</label>
+        <label class="check"><input type="checkbox" name="lab_show_kit" ${s.lab_show_kit === '1' ? 'checked' : ''}> نام کیت و Method زیر آزمایش</label></div>
+        <div class="secTitle">پذیرش و جوابدهی لابراتوار</div><div class="formGrid">
+        <label class="field"><span>تاریخ جوابدهی پیش‌فرض (روز بعد)</span><input name="lab_answer_days" type="number" value="${esc(s.lab_answer_days || 1)}"></label>
+        <label class="field"><span>جواب‌های قبلی تا چند ماه قبل</span><input name="lab_prev_months" type="number" value="${esc(s.lab_prev_months || 6)}"></label>
+        <label class="check"><input type="checkbox" name="lab_warn_repeat_day" ${s.lab_warn_repeat_day !== '0' ? 'checked' : ''}> هشدار آزمایش تکراری در یک روز</label>
+        <label class="check"><input type="checkbox" name="lab_warn_dup_tazkira" ${s.lab_warn_dup_tazkira !== '0' ? 'checked' : ''}> اخطار نمبر تذکره تکراری</label>
+        <label class="check"><input type="checkbox" name="lab_discount_reason_required" ${s.lab_discount_reason_required === '1' ? 'checked' : ''}> الزام ثبت دلیل تخفیف و تخفیف دهنده</label>
+        <label class="check"><input type="checkbox" name="lab_lock_approved" ${s.lab_lock_approved !== '0' ? 'checked' : ''}> نتایج تأیید شده بدون «باز کردن» تغییر نکند</label>
+        <label class="check"><input type="checkbox" name="lab_receipt_answer_date" ${s.lab_receipt_answer_date !== '0' ? 'checked' : ''}> تاریخ جوابدهی پررنگ در رسید</label>
+        <label class="check"><input type="checkbox" name="lab_receipt_weekday" ${s.lab_receipt_weekday !== '0' ? 'checked' : ''}> نام روز هفته در رسید</label>
+        <label class="check"><input type="checkbox" name="lab_receipt_mobile" ${s.lab_receipt_mobile !== '0' ? 'checked' : ''}> شماره تلفن مریض در رسید</label></div>
+        <div class="secTitle">لیبل تیوب نمونه</div><div class="formGrid"><label class="field"><span>عرض (mm)</span><input name="lab_label_w" type="number" value="${esc(s.lab_label_w || 50)}"></label><label class="field"><span>ارتفاع (mm)</span><input name="lab_label_h" type="number" value="${esc(s.lab_label_h || 25)}"></label><label class="field"><span>تعداد از هر لیبل</span><input name="lab_label_copies" type="number" value="${esc(s.lab_label_copies || 1)}"></label>
+          <label class="check"><input type="checkbox" name="lab_label_lab_name" ${s.lab_label_lab_name !== '0' ? 'checked' : ''}> نام و تلفن لابراتوار روی لیبل</label><label class="check"><input type="checkbox" name="lab_label_urgent" ${s.lab_label_urgent !== '0' ? 'checked' : ''}> علامت URGENT برای عاجل</label>
+          <label class="check"><input type="checkbox" name="lab_label_datetime" ${s.lab_label_datetime !== '0' ? 'checked' : ''}> تاریخ و ساعت</label><label class="check"><input type="checkbox" name="lab_label_en_digits" ${s.lab_label_en_digits !== '0' ? 'checked' : ''}> اعداد انگلیسی</label><label class="check"><input type="checkbox" name="lab_label_archive" ${s.lab_label_archive === '1' ? 'checked' : ''}> برچسب بایگانی هم چاپ شود</label></div>
         <div class="infoBox" style="margin-top:10px">آدرس کلینیک همیشه پایین صفحه چاپ می‌شود و به صفحه بعد نمی‌رود؛ اگر راپور طولانی باشد، سرخط و معلومات مریض در هر صفحه تکرار می‌شود.</div></div>
         <div><button type="button" class="btn" data-act="labPrev">${icon('eye')} پیش‌نمایش راپور با این تنظیمات</button></div></div></div>
       <div class="card hidden" data-p="cash"><div class="formGrid">
@@ -226,7 +246,7 @@ Pages.settings = {
       <div class="card hidden" data-p="colors"><p class="mini">رنگ اصلی هر ایستگاه (منو و دکمه‌ها). هر کمپیوتر می‌تواند در «تنظیمات این کمپیوتر» رنگ خودش را هم داشته باشد.</p><div class="formGrid">
         ${Object.entries(STATIONS).map(([k, st]) => `<label class="field"><span>${esc(st.name)}</span><span class="bar"><input type="color" name="color_${k}" data-def="${st.color}" value="${esc(s['color_' + k] || st.color)}"><button type="button" class="btn sm" data-reset="${k}">پیش‌فرض</button></span></label>`).join('')}</div></div>
       <datalist id="fontList">${PRINT_FONTS.map(f => `<option value="${esc(f)}">`).join('')}</datalist>
-      <div class="card hidden" data-p="lists"><div class="grid g3">${L('rx_forms', 'شکل دواها')}${L('rx_frequencies', 'دفعات مصرف')}${L('rx_timings', 'زمان مصرف')}${L('rx_units', 'واحد قوت')}${L('rx_routes', 'طریقه مصرف')}${L('rx_duration_units', 'واحد مدت', 3)}${L('expense_categories', 'کتگوری مصارف')}${L('medicine_categories', 'کتگوری دواها')}${L('medicine_units', 'واحد فروش دوا')}${L('doctor_work_types', 'نوع کار داکتران')}${L('lab_units', 'واحدهای لابراتوار')}</div></div>
+      <div class="card hidden" data-p="lists"><div class="grid g3">${L('rx_forms', 'شکل دواها')}${L('rx_frequencies', 'دفعات مصرف')}${L('rx_timings', 'زمان مصرف')}${L('rx_units', 'واحد قوت')}${L('rx_routes', 'طریقه مصرف')}${L('rx_duration_units', 'واحد مدت', 3)}${L('expense_categories', 'کتگوری مصارف')}${L('medicine_categories', 'کتگوری دواها')}${L('medicine_units', 'واحد فروش دوا')}${L('doctor_work_types', 'نوع کار داکتران')}${L('lab_units', 'واحدهای لابراتوار')}${L('lab_discount_reasons', 'دلایل تخفیف لابراتوار')}</div></div>
       </form>`;
     $('#stT', view).onclick = (e) => { const b = e.target.closest('[data-t]'); if (!b) return; $$('#stT button', view).forEach(x => x.classList.toggle('on', x === b)); $$('[data-p]', view).forEach(p => p.classList.toggle('hidden', p.dataset.p !== b.dataset.t)); };
     const collect = () => {
@@ -241,10 +261,11 @@ Pages.settings = {
       labPrev: () => {
         const saved = App.settings; App.settings = { ...saved, ...collect() };
         const t = (id, code, name, unit, lo, hi, dept, panel) => ({ id, code, name, unit, ref_low: lo, ref_high: hi, result_type: 'numeric', ranges: [], dept_name: dept, panel_id: panel || null });
-        const tests = [t(1, 'HB', 'Haemoglobin', 'g/dL', 12, 16, 'Haematology', 100), t(2, 'WBC', 'WBC count', '10³/µL', 4, 11, 'Haematology', 100), t(3, 'PLT', 'Platelets', '10³/µL', 150, 450, 'Haematology', 100), t(4, 'GLUF', 'Glucose (fasting)', 'mg/dL', 70, 110, 'Biochemistry'), t(5, 'TSH', 'TSH', 'µIU/mL', 0.4, 4.2, 'Hormones')];
+        const tests = [t(1, 'HB', 'Haemoglobin', 'g/dL', 12, 16, 'Haematology', 100), t(2, 'WBC', 'WBC count', '10³/µL', 4, 11, 'Haematology', 100), t(3, 'PLT', 'Platelets', '10³/µL', 150, 450, 'Haematology', 100), t(4, 'GLUF', 'Glucose (fasting)', 'mg/dL', 70, 110, 'Biochemistry'), t(5, 'TSH', 'TSH', 'µIU/mL', 0.4, 4.2, 'Hormones'), { ...t(6, 'NEUT%', 'Neutrophils %', '%', 40, 75, 'Haematology', 100), side_column: 1 }, { ...t(7, 'LYMPH%', 'Lymphocytes %', '%', 20, 45, 'Haematology', 100), side_column: 1 }];
         const html = labReportHTML({ lab_code: 'LB-00045', patient_code: 'P-10001', full_name: 'مریم احمدی', father_name: 'محمد', sex: 'F', birth_date: isoDate(addDays(new Date(), -365 * 29)), doctor_name: App.doctors[0]?.name || '', received_at: new Date().toISOString(), approved_at: new Date().toISOString(),
           items: [{ test_id: 100, name: 'CBC (Complete Blood Count)' }, { test_id: 4, name: 'Glucose (fasting)' }, { test_id: 5, name: 'TSH' }], tests,
-          results: [{ test_id: 1, value: '10.8', unit: 'g/dL' }, { test_id: 2, value: '7.2' }, { test_id: 3, value: '512', note: 'نمونه تکرار شد' }, { test_id: 4, value: '96' }, { test_id: 5, value: '2.1' }], report_note: 'Comment: sample shows mild microcytosis.' });
+          fasting: 'fast', clinical_notes: 'Anemia?', phone: '0790000000',
+          results: [{ test_id: 1, value: '10.8', unit: 'g/dL' }, { test_id: 2, value: '7.2' }, { test_id: 3, value: '512', note: 'نمونه تکرار شد' }, { test_id: 4, value: '96' }, { test_id: 5, value: '2.1' }, { test_id: 6, value: '54' }, { test_id: 7, value: '39' }], report_note: 'Comment: sample shows mild microcytosis.' });
         App.settings = saved;
         previewDoc(html, { size: 'A4', title: 'نمونه راپور' });
       },

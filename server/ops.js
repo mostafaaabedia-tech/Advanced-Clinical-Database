@@ -591,17 +591,55 @@ function makeOps(db, bus) {
   }
 
   // =================================================================== laboratory
+  // reception type (free / insurance contract): price basis, increase %, patient share (franchise) and default discount
+  function receptionType(id) { return (id && db.get('SELECT * FROM lab_reception_types WHERE id=?', [id])) || { id: null, price_basis: 'free', patient_pct: 100, increase_pct: 0, discount_pct: 0 }; }
+  function labTestPrice(t, rt) {
+    let pr = rt.price_basis === 'insurance' && t.price_ins != null ? n(t.price_ins) : n(t.price);
+    if (n(rt.increase_pct)) pr = roundPrice(pr * (1 + n(rt.increase_pct) / 100));
+    return r2(pr);
+  }
   function setLabItems(reqId, testIds) {
+    const req0 = db.get('SELECT * FROM lab_requests WHERE id=?', [reqId]);
+    const rt = receptionType(req0.reception_type_id);
+    if (rt.max_tests && testIds.length > rt.max_tests) fail(`در نوع پذیرش «${rt.name}» حداکثر ${rt.max_tests} آزمایش مجاز است`);
     db.run('DELETE FROM lab_request_items WHERE request_id=?', [reqId]);
     testIds.forEach((tid, i) => {
       const t = db.get('SELECT * FROM lab_tests WHERE id=?', [tid]); if (!t) fail('آزمایش پیدا نشد');
-      db.insert('lab_request_items', { request_id: reqId, test_id: t.id, name: t.name, price: t.price, cost: t.cost, sort: i + 1 });
+      const price = labTestPrice(t, rt);
+      db.insert('lab_request_items', { request_id: reqId, test_id: t.id, name: t.name, price, org_share: r2(price * (100 - n(rt.patient_pct, 100)) / 100), cost: t.cost, sendout_lab: t.sendout_lab || null, sort: i + 1 });
     });
+    recalcLabTotals(reqId);
+  }
+  function recalcLabTotals(reqId, discountAmount) {
     const sub = r2(db.scalar('SELECT IFNULL(SUM(price),0) FROM lab_request_items WHERE request_id=?', [reqId]));
+    const org = r2(db.scalar('SELECT IFNULL(SUM(org_share),0) FROM lab_request_items WHERE request_id=?', [reqId]));
     const cost = r2(db.scalar('SELECT IFNULL(SUM(cost),0) FROM lab_request_items WHERE request_id=?', [reqId]));
+    const sendout = db.scalar("SELECT COUNT(*) FROM lab_request_items WHERE request_id=? AND IFNULL(sendout_lab,'')<>''", [reqId]) ? 1 : 0;
     const req = db.get('SELECT * FROM lab_requests WHERE id=?', [reqId]);
-    const discount = req.status === 'requested' ? r2(sub * req.discount_pct / 100) : Math.min(sub, req.discount);
-    db.update('lab_requests', reqId, { subtotal: sub, cost, discount, net: r2(sub - discount) });
+    const share = r2(sub - org);                                                   // the patient's part
+    const pct = req.discount_pct || receptionType(req.reception_type_id).discount_pct || 0;
+    const discount = discountAmount !== undefined ? Math.min(share, Math.max(0, discountAmount)) : req.status === 'requested' ? r2(share * pct / 100) : Math.min(share, req.discount);
+    db.update('lab_requests', reqId, { subtotal: sub, org_share: org, cost, discount, net: r2(share - discount), sendout });
+  }
+  // extra reception fields of the laboratory (fasting, clinical notes, flags, answer date, referrer, discount reason …)
+  const LAB_HEAD_FIELDS = ['fasting', 'clinical_notes', 'sample_flag', 'answer_date', 'referrer', 'discount_reason', 'discount_by', 'note'];
+  function labHead(p) {
+    const row = {};
+    for (const f of LAB_HEAD_FIELDS) if (f in p) row[f] = str(p[f]);
+    for (const f of ['pregnant', 'urgent']) if (f in p) row[f] = p[f] ? 1 : 0;
+    if ('reception_type_id' in p) row.reception_type_id = p.reception_type_id ? Number(p.reception_type_id) : null;
+    if ('referrer_id' in p) row.referrer_id = p.referrer_id ? Number(p.referrer_id) : null;
+    if (row.answer_date && !isoOk(row.answer_date)) delete row.answer_date;
+    return row;
+  }
+  function checkReceptionType(rtId, patientId) {
+    const rt = receptionType(rtId); if (!rt.id) return;
+    if (!rt.active) fail(`نوع پذیرش «${rt.name}» غیرفعال است`);
+    let req = []; try { req = JSON.parse(rt.required_fields || '[]'); } catch (_) { }
+    const p = db.get('SELECT * FROM patients WHERE id=?', [patientId]) || {};
+    const names = { tazkira: 'نمبر تذکره', phone: 'شماره تلفن', birth_date: 'سن', father_name: 'ولد', address: 'آدرس', insurance_no: 'شماره بیمه' };
+    const miss = req.filter(f => !String(p[f] || '').trim());
+    if (miss.length) fail(`برای «${rt.name}» این معلومات مریض لازم است: ${miss.map(f => names[f] || f).join('، ')}`);
   }
   function labFull(idOrCode) {
     const r0 = typeof idOrCode === 'number' ? db.get('SELECT * FROM lab_requests WHERE id=?', [idOrCode]) : findByCode('lab_requests', 'lab_code', idOrCode);
@@ -617,13 +655,39 @@ function makeOps(db, bus) {
     }
     const ids = [...new Set(testIds.map(x => x[0]))];
     r.tests = ids.length ? db.all(`SELECT t.*, d.name dept_name, d.name_fa dept_name_fa, d.sort dept_sort FROM lab_tests t LEFT JOIN lab_departments d ON d.id=t.department_id WHERE t.id IN (${ids.join(',')})`) : [];
+    const resKit = new Map(db.all('SELECT test_id, kit_id FROM lab_results WHERE request_id=?', [r.id]).map(x => [x.test_id, x.kit_id]));
     r.tests.forEach(t => {
-      t.panel_id = (testIds.find(x => x[0] === t.id) || [])[1]; t.ranges = db.all('SELECT * FROM lab_ranges WHERE test_id=?', [t.id]);
+      const kitId = resKit.get(t.id) || t.active_kit_id || null;
+      t.kit = kitId ? db.get('SELECT * FROM lab_kits WHERE id=?', [kitId]) : null;
+      t.panel_id = (testIds.find(x => x[0] === t.id) || [])[1]; t.ranges = db.all('SELECT * FROM lab_ranges WHERE test_id=? AND (kit_id IS NULL OR kit_id=?)', [t.id, kitId || 0]);
+      if (t.ranges.some(x => x.kit_id)) t.ranges = t.ranges.filter(x => x.kit_id);   // the kit's own ranges replace the general ones
       if (t.panel_id) { const pt = db.get('SELECT t.department_id, d.name, d.name_fa, d.sort FROM lab_tests t LEFT JOIN lab_departments d ON d.id=t.department_id WHERE t.id=?', [t.panel_id]); if (pt) Object.assign(t, { page_dept: pt.name, page_dept_fa: pt.name_fa, page_sort: pt.sort }); }
       if (!t.page_dept) Object.assign(t, { page_dept: t.dept_name, page_dept_fa: t.dept_name_fa, page_sort: t.dept_sort });
     });
     r.tests.sort((a, b) => testIds.findIndex(x => x[0] === a.id) - testIds.findIndex(x => x[0] === b.id));
+    r.prev = labPrevResults(r.patient_id, ids, r.id);
+    r.reception = r.reception_type_id ? db.get('SELECT * FROM lab_reception_types WHERE id=?', [r.reception_type_id]) : null;
+    const uname = (id) => id ? db.scalar('SELECT full_name FROM users WHERE id=?', [id]) : null;
+    r.received_by_name = uname(r.received_by); r.checked_by_name = uname(r.checked_by); r.approved_by_name = uname(r.approved_by); r.sampled_by_name = uname(r.sampled_by); r.created_by_name = uname(r.created_by);
+    r.prev_id = db.scalar("SELECT MAX(id) FROM lab_requests WHERE id<? AND status NOT IN ('cancelled','requested')", [r.id]);
+    r.next_id = db.scalar("SELECT MIN(id) FROM lab_requests WHERE id>? AND status NOT IN ('cancelled','requested')", [r.id]);
     return r;
+  }
+  // last 4 answers of each test for this patient (within the configured months) → "Prev Res 1-4" columns
+  function labPrevResults(patientId, testIds, excludeReq) {
+    if (!testIds.length) return {};
+    const months = Math.max(0, n(setting('lab_prev_months', '6'), 6));
+    const from = (() => { const d = new Date(); d.setMonth(d.getMonth() - (months || 120)); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; })();
+    const rows = db.all(`SELECT x.test_id, x.value, x.flag, x.unit, r.date, r.lab_code, r.id request_id FROM lab_results x JOIN lab_requests r ON r.id=x.request_id
+      WHERE r.patient_id=? AND r.id<>? AND r.status NOT IN ('cancelled') AND r.date>=? AND x.test_id IN (${testIds.map(Number).join(',')}) AND IFNULL(x.value,'')<>'' ORDER BY r.date DESC, r.id DESC`, [patientId, excludeReq || 0, from]);
+    const out = {};
+    for (const x of rows) { (out[x.test_id] = out[x.test_id] || []); if (out[x.test_id].length < 4) out[x.test_id].push(x); }
+    return out;
+  }
+  // full history of one test for one patient (trend chart)
+  function labTestHistory(patientId, testId) {
+    return db.all(`SELECT x.value, x.flag, x.unit, x.ref, r.date, r.lab_code FROM lab_results x JOIN lab_requests r ON r.id=x.request_id
+      WHERE r.patient_id=? AND x.test_id=? AND r.status<>'cancelled' AND IFNULL(x.value,'')<>'' ORDER BY r.date, r.id`, [patientId, testId]);
   }
   function createLabWalkin(p, user) {
     return db.transaction(() => {
@@ -631,7 +695,9 @@ function makeOps(db, bus) {
       if (p.patient) patientId = savePatient({ ...p.patient, id: patientId || undefined }, user);
       if (!patientId) fail('مریض را انتخاب یا ثبت کنید');
       const ids = [...new Set((p.test_ids || []).map(Number).filter(Boolean))]; if (!ids.length) fail('آزمایش انتخاب نشده');
-      const reqId = db.insert('lab_requests', { lab_code: db.nextCode('lab'), patient_id: patientId, doctor_id: p.doctor_id || null, date: today(), note: str(p.note), source: 'walkin', created_by: user.id });
+      const head = labHead(p);
+      checkReceptionType(head.reception_type_id, patientId);
+      const reqId = db.insert('lab_requests', { ...head, lab_code: db.nextCode('lab'), patient_id: patientId, doctor_id: p.doctor_id || null, date: today(), source: 'walkin', created_by: user.id });
       setLabItems(reqId, ids);
       emit('lab:new', db.get('SELECT * FROM v_lab_requests WHERE id=?', [reqId]), ['lab', 'admin']);
       return reqId;
@@ -639,19 +705,31 @@ function makeOps(db, bus) {
   }
   function receiveLab(id, p, user, station) {
     return db.transaction(() => {
-      const r = db.get('SELECT * FROM lab_requests WHERE id=?', [id]); if (!r) fail('درخواست پیدا نشد');
-      if (r.status === 'cancelled') fail('این درخواست لغو شده');
+      const r0 = db.get('SELECT * FROM lab_requests WHERE id=?', [id]); if (!r0) fail('درخواست پیدا نشد');
+      if (r0.status === 'cancelled') fail('این درخواست لغو شده');
+      const head = labHead(p);
+      if (Object.keys(head).length) {
+        if ('reception_type_id' in head && head.reception_type_id !== r0.reception_type_id) checkReceptionType(head.reception_type_id, r0.patient_id);
+        db.update('lab_requests', id, head);
+        if ('reception_type_id' in head && head.reception_type_id !== r0.reception_type_id && !p.test_ids) setLabItems(id, db.all('SELECT test_id FROM lab_request_items WHERE request_id=? ORDER BY sort, id', [id]).map(x => x.test_id));
+      }
+      const r = db.get('SELECT * FROM lab_requests WHERE id=?', [id]);
       if (p.test_ids) {
         const ids = [...new Set(p.test_ids.map(Number).filter(Boolean))]; if (!ids.length) fail('حداقل یک آزمایش لازم است');
         const old = db.all('SELECT test_id FROM lab_request_items WHERE request_id=? ORDER BY sort, id', [id]).map(x => x.test_id);
-        if (JSON.stringify(old) !== JSON.stringify(ids)) setLabItems(id, ids);
+        if (JSON.stringify(old) !== JSON.stringify(ids) || 'reception_type_id' in head) setLabItems(id, ids);
       }
       const sub = db.scalar('SELECT IFNULL(SUM(price),0) FROM lab_request_items WHERE request_id=?', [id]);
-      let discount = p.discount !== undefined && p.discount !== '' && p.discount !== null ? n(p.discount) : r2(sub * n(p.discount_pct ?? r.discount_pct) / 100);
-      discount = Math.min(sub, Math.max(0, discount));
-      const net = r2(sub - discount);
+      const share = r2(sub - n(db.scalar('SELECT IFNULL(SUM(org_share),0) FROM lab_request_items WHERE request_id=?', [id])));
+      const pct = n(p.discount_pct ?? (r.discount_pct || receptionType(r.reception_type_id).discount_pct));
+      let discount = p.discount !== undefined && p.discount !== '' && p.discount !== null ? n(p.discount) : r2(share * pct / 100);
+      discount = Math.min(share, Math.max(0, discount));
+      const rr = db.get('SELECT * FROM lab_requests WHERE id=?', [id]);
+      if (discount > 0.001 && setting('lab_discount_reason_required', '0') === '1' && !rr.discount_reason && !rr.discount_pct && !receptionType(rr.reception_type_id).discount_pct) fail('برای تخفیف، دلیل و نام تخفیف دهنده را بنویسید');
+      const net = r2(share - discount);
       const row = { subtotal: r2(sub), discount, net, pay_method: p.pay_method || r.pay_method };
       if (r.status === 'requested') Object.assign(row, { status: 'received', received_at: nowStr(), received_by: user.id });
+      if (!rr.answer_date) row.answer_date = labAnswerDate(id, rr.urgent);
       db.update('lab_requests', id, row);
       const central = setting('cashier_mode', 'central') === 'central' && (station || user.station) === 'lab';
       const pay = p.paid === undefined || p.paid === null || p.paid === '' ? (r.status === 'requested' && !central ? net - r.paid : 0) : n(p.paid);
@@ -661,6 +739,16 @@ function makeOps(db, bus) {
       emit('lab:update', { id, lab_code: out.lab_code, status: out.status }, ['lab', 'admin', 'doctor'], { doctor_id: out.doctor_id });
       return out;
     });
+  }
+  // answer date = today + max turnaround of the tests (or the setting); urgent → today; skip days the tests are not done
+  function labAnswerDate(reqId, urgent) {
+    const d = new Date(); if (urgent) return today();
+    const tats = db.all('SELECT t.tat_days, t.tat_hours, t.weekdays FROM lab_request_items i JOIN lab_tests t ON t.id=i.test_id WHERE i.request_id=?', [reqId]);
+    let days = Math.max(n(setting('lab_answer_days', '1')), ...tats.map(t => t.tat_days != null ? n(t.tat_days) : t.tat_hours ? Math.ceil(n(t.tat_hours) / 24) : 0));
+    d.setDate(d.getDate() + Math.ceil(days));
+    const wd = tats.map(t => String(t.weekdays || '')).filter(Boolean);
+    for (let k = 0; k < 7 && wd.length && !wd.every(w => w.includes(String(d.getDay()))); k++) d.setDate(d.getDate() + 1);
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
   }
   function payLab(id, amount, method, user, station) {
     return db.transaction(() => {
@@ -675,17 +763,23 @@ function makeOps(db, bus) {
     return db.transaction(() => {
       const r = db.get('SELECT * FROM lab_requests WHERE id=?', [id]); if (!r) fail('درخواست پیدا نشد');
       if (r.status === 'requested') fail('ابتدا درخواست را پذیرش (و فیس را دریافت) کنید');
+      if (['approved', 'delivered'].includes(r.status) && (p.results || []).some(x => str(x.value) !== null) && p.status !== 'received' && setting('lab_lock_approved', '1') === '1') fail('نتایج تأیید شده؛ اول «باز کردن برای اصلاح» را بزنید');
       for (const x of p.results || []) {
         const val = str(x.value);
         if (val === null) { db.run('DELETE FROM lab_results WHERE request_id=? AND test_id=?', [id, x.test_id]); continue; }
-        db.run(`INSERT INTO lab_results(request_id,test_id,value,flag,unit,ref,note,entered_by) VALUES(?,?,?,?,?,?,?,?)
-          ON CONFLICT(request_id,test_id) DO UPDATE SET value=excluded.value, flag=excluded.flag, unit=excluded.unit, ref=excluded.ref, note=excluded.note, entered_by=excluded.entered_by, entered_at=datetime('now','localtime')`,
-          [id, x.test_id, val, str(x.flag), str(x.unit), str(x.ref), str(x.note), user.id]);
+        const t = db.get('SELECT * FROM lab_tests WHERE id=?', [x.test_id]) || {};
+        const numv = Number(String(val).replace(/^[<>]=?\s*/, ''));
+        if (t.numeric_only && t.result_type === 'numeric' && !isFinite(numv)) fail(`نتیجه «${t.name}» باید عدد باشد`);
+        if (t.result_type === 'numeric' && isFinite(numv) && ((t.possible_low != null && numv < t.possible_low) || (t.possible_high != null && numv > t.possible_high))) fail(`نتیجه «${t.name}» (${val}) خارج از محدوده ممکن است (${t.possible_low ?? ''} – ${t.possible_high ?? ''})`);
+        const kit = db.scalar('SELECT kit_id FROM lab_results WHERE request_id=? AND test_id=?', [id, x.test_id]) || t.active_kit_id || null;
+        db.run(`INSERT INTO lab_results(request_id,test_id,value,flag,unit,ref,note,entered_by,kit_id) VALUES(?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(request_id,test_id) DO UPDATE SET value=excluded.value, flag=excluded.flag, unit=excluded.unit, ref=excluded.ref, note=excluded.note, entered_by=excluded.entered_by, kit_id=excluded.kit_id, entered_at=datetime('now','localtime')`,
+          [id, x.test_id, val, str(x.flag), str(x.unit), str(x.ref), str(x.note), user.id, kit]);
       }
       const row = {};
       if ('report_note' in p) row.report_note = str(p.report_note);
-      if (p.status === 'completed' && ['received', 'completed'].includes(r.status)) Object.assign(row, { status: 'completed', completed_at: nowStr() });
-      if (p.status === 'approved') Object.assign(row, { status: 'approved', approved_at: nowStr(), approved_by: user.id, completed_at: r.completed_at || nowStr() });
+      if (p.status === 'completed' && ['received', 'completed'].includes(r.status)) Object.assign(row, { status: 'completed', completed_at: nowStr(), checked_by: user.id });
+      if (p.status === 'approved') Object.assign(row, { status: 'approved', approved_at: nowStr(), approved_by: user.id, completed_at: r.completed_at || nowStr(), checked_by: r.checked_by || user.id });
       if (p.status === 'delivered') Object.assign(row, { status: 'delivered', delivered_at: nowStr() });
       if (p.status === 'received' && ['completed', 'approved'].includes(r.status)) Object.assign(row, { status: 'received', approved_at: null, approved_by: null });
       if (Object.keys(row).length) db.update('lab_requests', id, row);
@@ -697,13 +791,15 @@ function makeOps(db, bus) {
   }
   function saveLabTest(t, user) {
     return db.transaction(() => {
-      const F = ['code', 'name', 'name_fa', 'sample', 'result_type', 'options', 'unit', 'ref_text', 'formula'];
-      const N = ['ref_low', 'ref_high', 'critical_low', 'critical_high', 'decimals', 'num_code', 'department_id', 'tat_hours'];
+      const F = ['code', 'name', 'name_fa', 'sample', 'result_type', 'options', 'unit', 'ref_text', 'formula',
+        'weekdays', 'sample_amount', 'tube', 'tube_sep', 'loinc', 'machine_code', 'sendout_lab', 'default_answer', 'ready_answers', 'sex_only', 'description', 'report_name'];
+      const N = ['ref_low', 'ref_high', 'critical_low', 'critical_high', 'decimals', 'num_code', 'department_id', 'tat_hours',
+        'tat_days', 'price_ins', 'sendout_cost', 'possible_low', 'possible_high', 'active_kit_id', 'sort'];
       const row = {};
       for (const f of F) if (f in t) row[f] = str(t[f]);
       for (const f of N) if (f in t) row[f] = t[f] === '' || t[f] == null ? null : n(t[f]);
       for (const f of ['price', 'cost']) if (f in t) row[f] = Math.max(0, n(t[f]));
-      for (const f of ['active', 'orderable', 'is_panel']) if (f in t) row[f] = t[f] ? 1 : 0;
+      for (const f of ['active', 'orderable', 'is_panel', 'numeric_only', 'critical_report', 'side_column']) if (f in t) row[f] = t[f] ? 1 : 0;
       let id = t.id ? Number(t.id) : null;
       if (row.code) { const dup = db.get('SELECT id FROM lab_tests WHERE code=? AND id<>?', [row.code, id || 0]); if (dup) fail('این کد آزمایش تکراری است'); }
       if (id) db.update('lab_tests', id, row);
@@ -718,12 +814,135 @@ function makeOps(db, bus) {
       }
       if (Array.isArray(t.ranges)) {
         db.run('DELETE FROM lab_ranges WHERE test_id=?', [id]);
-        for (const r of t.ranges) db.insert('lab_ranges', { test_id: id, sex: ['M', 'F'].includes(r.sex) ? r.sex : 'A', age_min_days: r.age_min_days === '' ? null : r.age_min_days, age_max_days: r.age_max_days === '' ? null : r.age_max_days, low: r.low === '' ? null : r.low, high: r.high === '' ? null : r.high, text: str(r.text) });
+        const nv = (x) => x === '' || x === undefined || x === null ? null : n(x);
+        for (const r of t.ranges) db.insert('lab_ranges', { test_id: id, sex: ['M', 'F'].includes(r.sex) ? r.sex : 'A', age_min_days: nv(r.age_min_days), age_max_days: nv(r.age_max_days), low: nv(r.low), high: nv(r.high), text: str(r.text),
+          kit_id: r.kit_id ? Number(r.kit_id) : null, alarm_low: nv(r.alarm_low), alarm_high: nv(r.alarm_high), crit_low: nv(r.crit_low), crit_high: nv(r.crit_high), min_valid: nv(r.min_valid), max_valid: nv(r.max_valid) });
       }
       return id;
     });
   }
 
+
+  // =================================================================== laboratory: kits, re-flagging, reports
+  function saveLabKit(k, user) {
+    return db.transaction(() => {
+      const t = db.get('SELECT id FROM lab_tests WHERE id=?', [k.test_id]); if (!t) fail('آزمایش پیدا نشد');
+      if (k.remove) { db.run('DELETE FROM lab_ranges WHERE kit_id=?', [k.remove]); db.run('DELETE FROM lab_kits WHERE id=?', [k.remove]); db.run('UPDATE lab_tests SET active_kit_id=NULL WHERE active_kit_id=?', [k.remove]); return null; }
+      const row = { test_id: t.id, name: str(k.name) || 'Kit', lot_no: str(k.lot_no), expiry: str(k.expiry), method: str(k.method), company: str(k.company) };
+      let id = k.id ? Number(k.id) : null;
+      if (id) db.update('lab_kits', id, row); else id = db.insert('lab_kits', row);
+      if (k.copy_ranges_from !== undefined && !k.id) {                       // a new kit starts with the ranges in use
+        const src = k.copy_ranges_from ? db.all('SELECT * FROM lab_ranges WHERE test_id=? AND kit_id=?', [t.id, k.copy_ranges_from]) : db.all('SELECT * FROM lab_ranges WHERE test_id=? AND kit_id IS NULL', [t.id]);
+        for (const r of src) { const { id: _x, ...rest } = r; db.insert('lab_ranges', { ...rest, kit_id: id }); }
+        if (!src.length) {                                                 // no age / sex rows yet: start from the general normal range
+          const tt = db.get('SELECT * FROM lab_tests WHERE id=?', [t.id]);
+          db.insert('lab_ranges', { test_id: t.id, kit_id: id, sex: 'A', low: tt.ref_low, high: tt.ref_high, text: tt.ref_text, crit_low: tt.critical_low, crit_high: tt.critical_high, min_valid: tt.possible_low, max_valid: tt.possible_high });
+        }
+      }
+      if (k.active) { db.run('UPDATE lab_kits SET active=0 WHERE test_id=?', [t.id]); db.update('lab_kits', id, { active: 1 }); db.update('lab_tests', t.id, { active_kit_id: id }); }
+      else if (k.active === false || k.active === 0) { db.update('lab_kits', id, { active: 0 }); db.run('UPDATE lab_tests SET active_kit_id=NULL WHERE id=? AND active_kit_id=?', [t.id, id]); }
+      return db.get('SELECT * FROM lab_kits WHERE id=?', [id]);
+    });
+  }
+  // server copy of the range / flag logic (same as the result-entry screen)
+  function ageDaysAt(birth, at) { if (!birth) return null; const b = new Date(birth + 'T12:00:00'), a = new Date(String(at).slice(0, 10) + 'T12:00:00'); return Math.max(0, Math.round((a - b) / 864e5)); }
+  function rangeFor(test, ranges, sex, ageDays) {
+    const rs = ranges.filter(r => (r.sex === 'A' || r.sex === sex) && (r.age_min_days == null || ageDays == null || ageDays >= r.age_min_days) && (r.age_max_days == null || ageDays == null || ageDays < r.age_max_days));
+    const span = (x) => (x.age_max_days ?? 1e7) - (x.age_min_days ?? 0);
+    rs.sort((a, b) => (b.sex !== 'A') - (a.sex !== 'A') || span(a) - span(b));
+    return rs[0] || { low: test.ref_low, high: test.ref_high, text: test.ref_text, crit_low: test.critical_low, crit_high: test.critical_high };
+  }
+  function flagFor(test, value, rg) {
+    const v = Number(String(value ?? '').trim().replace(/^[<>]=?\s*/, '')); if (test.result_type !== 'numeric' || !isFinite(v) || String(value).trim() === '') return null;
+    const cl = rg.crit_low ?? test.critical_low, ch = rg.crit_high ?? test.critical_high;
+    if (cl != null && v < cl) return 'LL'; if (ch != null && v > ch) return 'HH';
+    if (rg.low != null && v < rg.low) return 'L'; if (rg.high != null && v > rg.high) return 'H'; return null;
+  }
+  function refText(test, rg) { if (rg.text) return rg.text; if (rg.low != null && rg.high != null) return `${rg.low} - ${rg.high}`; if (rg.low != null) return `≥ ${rg.low}`; if (rg.high != null) return `≤ ${rg.high}`; return test.ref_text || ''; }
+  // "apply the changed normal ranges to the answers of a date range" (by reception or answer date)
+  function applyRanges(p, user) {
+    return db.transaction(() => {
+      const t = db.get('SELECT * FROM lab_tests WHERE id=?', [p.test_id]); if (!t) fail('آزمایش پیدا نشد');
+      if (!isoOk(p.from) || !isoOk(p.to)) fail('بازه تاریخ نامعتبر');
+      const kit = t.active_kit_id || null;
+      let ranges = db.all('SELECT * FROM lab_ranges WHERE test_id=? AND (kit_id IS NULL OR kit_id=?)', [t.id, kit || 0]); if (ranges.some(x => x.kit_id)) ranges = ranges.filter(x => x.kit_id);
+      const col = p.basis === 'answer' ? 'DATE(IFNULL(r.approved_at, r.completed_at))' : 'r.date';
+      const rows = db.all(`SELECT x.id, x.value, r.date, p.sex, p.birth_date FROM lab_results x JOIN lab_requests r ON r.id=x.request_id JOIN patients p ON p.id=r.patient_id WHERE x.test_id=? AND ${col} BETWEEN ? AND ?`, [t.id, p.from, p.to]);
+      let changed = 0;
+      for (const x of rows) { const rg = rangeFor(t, ranges, x.sex, ageDaysAt(x.birth_date, x.date)); db.run('UPDATE lab_results SET flag=?, ref=?, kit_id=? WHERE id=?', [flagFor(t, x.value, rg), refText(t, rg), kit, x.id]); changed++; }
+      return { changed };
+    });
+  }
+  // tests of these ids already registered for the patient today (warning "repeated test in one day")
+  function labRepeatCheck(patientId, testIds, excludeId, days) {
+    if (!patientId || !testIds.length) return [];
+    const from = (() => { const d = new Date(); d.setDate(d.getDate() - (n(days) || 0)); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; })();
+    return db.all(`SELECT i.test_id, i.name, r.lab_code, r.date FROM lab_request_items i JOIN lab_requests r ON r.id=i.request_id WHERE r.patient_id=? AND r.id<>? AND r.status<>'cancelled' AND r.date>=? AND i.test_id IN (${testIds.map(Number).join(',')})`, [patientId, excludeId || 0, from]);
+  }
+  // patient statistics (آمار مراجعین) with the filters of the lab's previous program
+  function labStats(f) {
+    const w = ['r.date BETWEEN ? AND ?'], P = [isoOk(f.from) ? f.from : today(), isoOk(f.to) ? f.to : (isoOk(f.from) ? f.from : today())];
+    if (f.time_from) { w.push("substr(r.created_at,12,5) >= ?"); P.push(f.time_from); }
+    if (f.time_to) { w.push("substr(r.created_at,12,5) <= ?"); P.push(f.time_to); }
+    if (f.no_from) { w.push("CAST(substr(r.lab_code, length(rtrim(r.lab_code,'0123456789'))+1) AS INTEGER) >= ?"); P.push(n(f.no_from)); }
+    if (f.no_to) { w.push("CAST(substr(r.lab_code, length(rtrim(r.lab_code,'0123456789'))+1) AS INTEGER) <= ?"); P.push(n(f.no_to)); }
+    if (f.cancelled === 'only') w.push("r.status='cancelled'"); else if (f.cancelled !== 'all') w.push("r.status<>'cancelled'");
+    if (f.billed !== 'all') w.push("r.status<>'requested'");
+    if (f.pay === 'settled') w.push('ABS(r.net - r.paid) <= 0.001'); if (f.pay === 'debtor') w.push('r.net - r.paid > 0.001'); if (f.pay === 'creditor') w.push('r.paid - r.net > 0.001');
+    if (f.urgent === '1') w.push('r.urgent=1'); if (f.urgent === '0') w.push('IFNULL(r.urgent,0)=0');
+    if (f.answer === 'complete') w.push("r.status IN ('completed','approved','delivered')"); if (f.answer === 'incomplete') w.push("r.status IN ('requested','received')");
+    if (f.discount === '1') w.push('r.discount > 0'); if (f.discount === '0') w.push('IFNULL(r.discount,0) = 0');
+    if (f.discount_by) { w.push('r.discount_by = ?'); P.push(f.discount_by); }
+    if (f.discount_reason) { w.push('r.discount_reason = ?'); P.push(f.discount_reason); }
+    if (f.sex) { w.push('p.sex = ?'); P.push(f.sex); }
+    if (f.source) { w.push('r.source = ?'); P.push(f.source); }
+    if (f.sendout === '1') w.push('IFNULL(r.sendout,0)=1'); if (f.sendout === '0') w.push('IFNULL(r.sendout,0)=0');
+    if (f.reception_type_id) { w.push('r.reception_type_id = ?'); P.push(Number(f.reception_type_id)); }
+    if (f.user_id) { w.push('r.created_by = ?'); P.push(Number(f.user_id)); }
+    const list = (k) => String(f[k] || '').split(',').map(Number).filter(Boolean);
+    if (list('doctor_ids').length || list('referrer_ids').length) { const a = []; if (list('doctor_ids').length) a.push(`r.doctor_id IN (${list('doctor_ids').join(',')})`); if (list('referrer_ids').length) a.push(`r.referrer_id IN (${list('referrer_ids').join(',')})`); w.push('(' + a.join(' OR ') + ')'); }
+    if (f.specialty) { w.push('(rf.specialty = ? OR md.name = ?)'); P.push(f.specialty, f.specialty); }
+    if (list('dept_ids').length) w.push(`EXISTS (SELECT 1 FROM lab_request_items i JOIN lab_tests t ON t.id=i.test_id WHERE i.request_id=r.id AND t.department_id IN (${list('dept_ids').join(',')}))`);
+    if (list('test_ids').length) w.push(`EXISTS (SELECT 1 FROM lab_request_items i WHERE i.request_id=r.id AND i.test_id IN (${list('test_ids').join(',')}))`);
+    const W = w.join(' AND ');
+    const FROM = `FROM lab_requests r JOIN patients p ON p.id=r.patient_id LEFT JOIN doctors d ON d.id=r.doctor_id LEFT JOIN medical_departments md ON md.id=d.department_id LEFT JOIN lab_referrers rf ON rf.id=r.referrer_id LEFT JOIN lab_reception_types rt ON rt.id=r.reception_type_id LEFT JOIN users u ON u.id=r.created_by`;
+    const rows = db.all(`SELECT r.id, r.lab_code, r.date, r.created_at, r.status, r.urgent, r.source, r.subtotal, IFNULL(r.org_share,0) org_share, r.discount, r.discount_reason, r.discount_by, r.net, r.paid, (r.net - r.paid) balance,
+      p.code patient_code, p.full_name, p.father_name, p.sex, p.tazkira, p.phone, COALESCE(d.name, rf.name, r.referrer) doctor_name, COALESCE(rf.specialty, md.name) specialty, rt.name reception_type, u.full_name user_name,
+      (SELECT GROUP_CONCAT(t.code, ' ') FROM lab_request_items i JOIN lab_tests t ON t.id=i.test_id WHERE i.request_id=r.id) tests
+      ${FROM} WHERE ${W} ORDER BY r.id`, P);
+    const ids = rows.map(r => r.id); const IN = ids.length ? ids.join(',') : '0';
+    const pays = db.all(`SELECT method, SUM(amount) s, COUNT(*) c FROM lab_payments WHERE request_id IN (${IN}) GROUP BY method`);
+    const sum = (k) => r2(rows.reduce((a, r) => a + (r[k] || 0), 0));
+    const totals = { count: rows.length, subtotal: sum('subtotal'), org_share: sum('org_share'), patient_share: r2(sum('subtotal') - sum('org_share')), discount: sum('discount'), net: sum('net'), paid: sum('paid'), balance: sum('balance'),
+      cash: r2(pays.filter(x => x.method !== 'card' && x.method !== 'transfer').reduce((a, x) => a + x.s, 0)), card: r2(pays.filter(x => x.method === 'card').reduce((a, x) => a + x.s, 0)), transfer: r2(pays.filter(x => x.method === 'transfer').reduce((a, x) => a + x.s, 0)) };
+    const group = (keyFn) => { const m = new Map(); for (const r of rows) { const k = keyFn(r) || '—'; const o = m.get(k) || { key: k, count: 0, subtotal: 0, discount: 0, net: 0, paid: 0 }; o.count++; o.subtotal = r2(o.subtotal + r.subtotal); o.discount = r2(o.discount + r.discount); o.net = r2(o.net + r.net); o.paid = r2(o.paid + r.paid); m.set(k, o); } return [...m.values()]; };
+    const byHour = group(r => String(r.created_at || '').slice(11, 13) + ':00').sort((a, b) => a.key.localeCompare(b.key));
+    const byDay = group(r => r.date).sort((a, b) => a.key.localeCompare(b.key));
+    const discounts = group(r => r.discount > 0 ? `${r.discount_by || 'نامشخص'} — ${r.discount_reason || 'بدون دلیل'}` : null).filter(x => x.key !== '—').sort((a, b) => b.discount - a.discount);
+    const byType = group(r => r.reception_type || 'عادی');
+    const byTest = db.all(`SELECT t.id, t.code, t.name, d.name dept, COUNT(*) count, SUM(i.price) revenue, SUM(IFNULL(i.org_share,0)) org FROM lab_request_items i JOIN lab_tests t ON t.id=i.test_id LEFT JOIN lab_departments d ON d.id=t.department_id WHERE i.request_id IN (${IN}) GROUP BY t.id ORDER BY count DESC`);
+    const repeated = db.all(`SELECT p.code patient_code, p.full_name, t.code, t.name, COUNT(*) times, GROUP_CONCAT(r.lab_code, ' ') codes FROM lab_request_items i JOIN lab_requests r ON r.id=i.request_id JOIN patients p ON p.id=r.patient_id JOIN lab_tests t ON t.id=i.test_id
+      WHERE i.request_id IN (${IN}) GROUP BY r.patient_id, i.test_id HAVING COUNT(*) > 1 ORDER BY times DESC`);
+    const sampled = rows.filter(r => db.scalar('SELECT sampled_at FROM lab_requests WHERE id=?', [r.id])).length;
+    return { rows, totals, pays, byHour, byDay, discounts, byType, byTest, repeated, sampled };
+  }
+  // income of referring doctors (clinic doctors and outside referrers) + monthly trend of referred patients
+  function labDoctorIncome(f) {
+    const from = isoOk(f.from) ? f.from : today(), to = isoOk(f.to) ? f.to : from;
+    const w = ["r.status NOT IN ('cancelled','requested')", 'r.date BETWEEN ? AND ?'], P = [from, to];
+    if (f.source) { w.push('r.source=?'); P.push(f.source); }
+    if (f.dept_id) { w.push('EXISTS (SELECT 1 FROM lab_request_items i JOIN lab_tests t ON t.id=i.test_id WHERE i.request_id=r.id AND t.department_id=?)'); P.push(Number(f.dept_id)); }
+    const rows = db.all(`SELECT CASE WHEN r.doctor_id IS NOT NULL THEN 'd' || r.doctor_id WHEN r.referrer_id IS NOT NULL THEN 'r' || r.referrer_id WHEN IFNULL(r.referrer,'')<>'' THEN 'n' || r.referrer ELSE '-' END k,
+      COALESCE(d.title || ' ' || d.name, d.name, rf.name, NULLIF(r.referrer,''), 'مراجعه مستقیم') name, rf.council_no, COALESCE(rf.specialty, md.name, d.specialty) specialty,
+      COUNT(DISTINCT r.patient_id) patients, COUNT(*) requests,
+      SUM(r.subtotal) income, SUM(r.discount) discount, SUM(r.net) net, SUM(r.paid) paid
+      FROM lab_requests r LEFT JOIN doctors d ON d.id=r.doctor_id LEFT JOIN medical_departments md ON md.id=d.department_id LEFT JOIN lab_referrers rf ON rf.id=r.referrer_id
+      WHERE ${w.join(' AND ')} GROUP BY k ORDER BY income DESC`, P);
+    rows.forEach(r => { r.tests = db.scalar(`SELECT COUNT(*) FROM lab_request_items i JOIN lab_requests r ON r.id=i.request_id WHERE ${w.join(' AND ')} AND (CASE WHEN r.doctor_id IS NOT NULL THEN 'd' || r.doctor_id WHEN r.referrer_id IS NOT NULL THEN 'r' || r.referrer_id WHEN IFNULL(r.referrer,'')<>'' THEN 'n' || r.referrer ELSE '-' END)=?`, [...P, r.k]); });
+    const trend = db.all(`SELECT r.date, CASE WHEN r.doctor_id IS NOT NULL THEN 'd' || r.doctor_id WHEN r.referrer_id IS NOT NULL THEN 'r' || r.referrer_id WHEN IFNULL(r.referrer,'')<>'' THEN 'n' || r.referrer ELSE '-' END k, COUNT(*) c, SUM(r.subtotal) s
+      FROM lab_requests r WHERE r.status NOT IN ('cancelled','requested') AND r.date BETWEEN ? AND ? GROUP BY r.date, k`, [f.trend_from || from, f.trend_to || to]);
+    return { rows, trend };
+  }
 
   // =================================================================== central cashier (reception)
   function paySale(id, amount, method, note, user, station) {
@@ -791,7 +1010,7 @@ function makeOps(db, bus) {
       UNION ALL SELECT 'admission', ap.amount, ap.method, ap.note, ap.created_at, a.adm_no, u.full_name FROM admission_payments ap JOIN admissions a ON a.id=ap.admission_id LEFT JOIN users u ON u.id=ap.created_by WHERE a.patient_id=?
       UNION ALL SELECT 'deposit', d.amount, d.method, d.note, d.created_at, '', u.full_name FROM patient_deposits d LEFT JOIN users u ON u.id=d.created_by WHERE d.patient_id=?
     ) ORDER BY created_at DESC LIMIT 300`, [patientId, patientId, patientId, patientId, patientId]);
-    const due = r2(visits.reduce((a, v) => a + (v.status === 'cancelled' ? 0 : v.balance), 0) + labs.reduce((a, l) => a + (l.status === 'requested' ? l.subtotal * (1 - l.discount_pct / 100) : l.balance), 0)
+    const due = r2(visits.reduce((a, v) => a + (v.status === 'cancelled' ? 0 : v.balance), 0) + labs.reduce((a, l) => a + l.balance, 0)
       + sales.reduce((a, x) => a + x.balance, 0) + admissions.reduce((a, x) => a + x.balance, 0));
     return { patient, visits, labs, sales, admissions, payments, deposit: depositBalance(patientId), due };
   }
@@ -1141,7 +1360,8 @@ function makeOps(db, bus) {
     reportDays, medicineSales, supplierLedger, doctorStats, stockSummary, dashboard, medicineStock, dayRange,
     alternatives, paySale, addDeposit, depositBalance, cashierPay, cashierPending, patientAccount, cashierDay, cashClose,
     labItemMove, applyLabConsumption, admit, transferBed, addAdmissionCharge, dischargeAdmission, payAdmission, admissionFull, ipdBoard,
-    reorderSuggestions, doctorLoad, saveDoctorSchedule, queueDisplay, callVisit
+    reorderSuggestions, doctorLoad, saveDoctorSchedule, queueDisplay, callVisit,
+    saveLabKit, applyRanges, labRepeatCheck, labStats, labDoctorIncome, labTestHistory, labPrevResults, recalcLabTotals
   };
 }
 

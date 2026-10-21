@@ -70,9 +70,7 @@ async function cashierPayDlg(kind, id, after) {
   const amt = $('#cpAmt', m.el);
   const calc = () => {
     if (billing) {
-      const sub = sel.reduce((a, tid) => a + (cat.byId.get(tid)?.price || 0), 0);
-      const disc = $('#cpDisc', m.el).value !== '' ? Math.min(sub, Number($('#cpDisc', m.el).value) || 0) : r2(sub * (Number($('#cpPct', m.el).value) || 0) / 100);
-      net = r2(sub - disc);
+      net = labPriceCalc(cat, sel, d.reception_type_id, $('#cpPct', m.el).value, $('#cpDisc', m.el).value).net;
       $('#cpTests', m.el).innerHTML = sel.map(tid => { const t = cat.byId.get(tid); return `<div class="selRow"><span class="codeTag">${esc(t?.code || '')}</span><span class="nm en">${esc(t?.name || '')}</span><b>${money(t?.price || 0)}</b><button class="btn ghost icon" data-rm="${tid}" title="حذف">${icon('x', 14)}</button></div>`; }).join('') || '<div class="empty">هیچ آزمایشی نماند — درخواست را لغو کنید</div>';
     }
     const due = r2(net - paid);
@@ -205,7 +203,8 @@ function ptPickerHTML(pfx) {
   return `<div id="${pfx}"><div class="searchBox" style="margin-bottom:10px"><input data-pp="q" placeholder="جستجوی مریض قبلی: کد، نام یا تلفن…" autocomplete="off"></div><div data-pp="sel"></div>
     <div class="recForm" data-pp="form"><label class="field c3"><span>نام <em>*</em></span><input name="full_name" autocomplete="off"></label><label class="field c3"><span>ولد</span><input name="father_name" autocomplete="off"></label>
       <label class="field c2"><span>جنس</span><select name="sex">${opt([['M', 'مذکر'], ['F', 'مونث']], 'M')}</select></label><div class="field c4" style="grid-column:span 4"><span>سن (سال / ماه / روز)</span>${ageInputHTML(pfx + 'Age', '', { compact: true })}</div>
-      <label class="field c3"><span>تلفن</span><input name="phone" class="ltr" autocomplete="off"></label><label class="field c3"><span>آدرس</span><input name="address" autocomplete="off"></label></div></div>`;
+      <label class="field c3"><span>تلفن</span><input name="phone" class="ltr" autocomplete="off"></label><label class="field c3"><span>نمبر تذکره (کد ملی)</span><input name="tazkira" class="ltr" autocomplete="off"></label>
+      <label class="field c6" style="grid-column:1/-1"><span>آدرس</span><input name="address" autocomplete="off"></label></div></div>`;
 }
 function bindPtPicker(root, pfx, { onPick } = {}) {
   const box = $('#' + pfx, root); let patient = null;
@@ -240,32 +239,40 @@ Pages['rc-lab'] = {
       <div class="toolbar"><button class="btn" data-act="cashier">${icon('cash')} صندوق مرکزی</button></div></div>
       <div class="recGrid"><div><div class="card"><h2>${icon('user')} مریض</h2>${ptPickerHTML('rlPt')}
           <div class="secTitle" style="margin-top:12px">${icon('steth', 15)} داکتر ارجاع دهنده</div>${doctorPickerHTML('rlDr', { placeholder: 'بیرونی / بدون داکتر' })}
-          <label class="field" style="margin-top:10px"><span>یادداشت</span><input id="rlNote" placeholder="مثلاً: ناشتا، عاجل…"></label></div>
+          <label class="field" style="margin-top:10px"><span>یادداشت</span><input id="rlNote" placeholder="یادداشت برای لابراتوار…"></label>
+          <div class="secTitle" style="margin-top:12px">${icon('flask', 15)} معلومات پذیرش لابراتوار</div>${labReceptionFieldsHTML('rlR', {}, cat)}</div>
         <div class="card"><div class="cardHead"><h2>${icon('list')} ثبت‌های لابراتوار امروز</h2><span class="muted small">${fmtDate(today())}</span></div><div id="rlToday"></div></div></div>
         <div class="card"><h2>${icon('flask')} آزمایش‌ها <small class="muted">— فقط مخفف آزمایش؛ موس را نگه دارید تا نام کامل دیده شود</small></h2>
           <div class="searchBox"><input id="rlQ" placeholder="مخفف، نام یا نمبر آزمایش… (Enter = افزودن)" autocomplete="off"></div>
           <div class="deptTabs" id="rlDeps" style="position:static;margin-top:10px"><button data-dep="all" class="on">همه</button>${deps.map(d => `<button data-dep="${d.id}" title="${esc(d.name_fa || '')}">${esc(d.name || d.code)}</button>`).join('')}</div>
           <div class="testChips" id="rlChips"></div>
           <div class="selList" id="rlSel" style="margin-top:12px"></div>
-          <div class="totals"><div><span>جمع کل</span><b id="rlSub">0</b></div>
+          <div id="rlWarn"></div>
+          <div class="totals"><div><span>جمع کل</span><b id="rlSub">0</b></div><div id="rlOrgRow" class="hidden"><span>سهم مؤسسه / بیمه</span><b id="rlOrg">0</b></div>
             <div><span>تخفیف ٪</span><span class="bar"><input type="number" id="rlPct" value="0" style="width:70px"> <small>یا مبلغ</small> <input type="number" id="rlDisc" style="width:90px"></span></div>
-            <div><span>قابل پرداخت</span><b id="rlNet">0</b></div></div>
+            <div><span>قابل پرداخت (سهم مریض)</span><b id="rlNet">0</b></div></div>
           <div class="formGrid" style="margin-top:10px"><label class="field"><span>دریافت شده</span><input type="number" id="rlPaid" class="big"></label><label class="field"><span>طریقه</span><select id="rlPm">${opt(Object.entries(PAY_METHODS), 'cash')}</select></label></div>
           <div class="stack" style="margin-top:12px"><button class="btn primary lg" data-act="save" data-print="1" style="justify-content:center">${icon('print')} ثبت، دریافت پول و چاپ رسید</button>
             <button class="btn" data-act="save" data-later="1" style="justify-content:center">${icon('send')} ثبت و ارسال به لابراتوار (پرداخت بعداً در صندوق)</button></div></div></div>`;
-    const pt = bindPtPicker(view, 'rlPt');
+    let calcFn = null;
+    const pt = bindPtPicker(view, 'rlPt', { onPick: () => calcFn && calcFn() });
     const drPick = bindDoctorPicker(view, 'rlDr', { selected: params.doctor_id || '' });
+    const rf = bindLabReceptionFields(view, 'rlR', cat, { onChange: () => calcFn && calcFn() }); rf.touchAnswer();
     if (params.patient_id) pt.set(await API.one('patients', params.patient_id));
     const chips = () => {
       const q = $('#rlQ', view).value.trim().toLowerCase();
       const list = orderable.filter(t => (dep === 'all' || t.department_id === Number(dep)) && (!q || t.code.toLowerCase().includes(q) || t.name.toLowerCase().includes(q) || String(t.num_code) === q));
       $('#rlChips', view).innerHTML = list.map(t => `<button type="button" class="chip ${sel.includes(t.id) ? 'on' : ''}" data-tid="${t.id}" title="${esc(t.name)} — ${money(t.price)}">${esc(t.code)}</button>`).join('') || '<span class="muted">آزمایشی پیدا نشد</span>';
     };
-    const calc = () => {
-      const sub = sel.reduce((a, id) => a + (cat.byId.get(id)?.price || 0), 0);
-      const disc = $('#rlDisc', view).value !== '' ? Math.min(sub, Number($('#rlDisc', view).value) || 0) : r2(sub * (Number($('#rlPct', view).value) || 0) / 100);
-      $('#rlSub', view).textContent = money(sub); $('#rlNet', view).textContent = money(sub - disc) + ' ' + currency();
-      if (!$('#rlPaid', view).dataset.t) $('#rlPaid', view).value = r2(sub - disc);
+    const calc = calcFn = () => {
+      const pc = labPriceCalc(cat, sel, rf.rtId(), $('#rlPct', view).value, $('#rlDisc', view).value);
+      $('#rlSub', view).textContent = money(pc.sub); $('#rlNet', view).textContent = money(pc.net) + ' ' + currency();
+      $('#rlOrg', view).textContent = money(pc.org); $('#rlOrgRow', view).classList.toggle('hidden', !pc.org);
+      if (!$('#rlPaid', view).dataset.t) $('#rlPaid', view).value = pc.net;
+      rf.setAnswerDate(sel.length ? labAnswerDateCalc(cat, sel, rf.urgent()) : '');
+      const sex = pt.patient ? pt.patient.sex : $('#rlPt [name=sex]', view).value;
+      const w = labReceptionWarnings(cat, sel, { sex }, rf.rtId());
+      $('#rlWarn', view).innerHTML = w.length ? `<div class="cdss">${w.map(x => `<div>⚠ ${esc(x)}</div>`).join('')}</div>` : '';
       $('#rlSel', view).innerHTML = sel.map(id => { const t = cat.byId.get(id); return `<div class="selRow"><span class="codeTag" title="${esc(t.name)}">${esc(t.code)}</span><span class="nm muted small en">${t.is_panel ? 'پنل · ' + (cat.components.get(t.id) || []).length + ' آزمایش' : ''}</span><b>${money(t.price)}</b><button class="btn ghost icon" data-rm="${id}">${icon('x', 14)}</button></div>`; }).join('') || '<div class="empty">آزمایش انتخاب نشده</div>';
       chips();
     };
@@ -295,7 +302,10 @@ Pages['rc-lab'] = {
       cashier: () => go('cashier'),
       save: (b) => busy(b, async () => {
         const who = pt.value(); if (!sel.length) throw new Error('آزمایش انتخاب نشده');
-        let r = await API.post('/api/lab/walkin', { ...who, test_ids: sel, doctor_id: drPick.get() || null, note: $('#rlNote', view).value });
+        const pc = labPriceCalc(cat, sel, rf.rtId(), $('#rlPct', view).value, $('#rlDisc', view).value);
+        if (!rf.discountOk(pc.discount)) throw new Error('برای تخفیف، دلیل تخفیف و نام تخفیف دهنده را بنویسید');
+        if (!(await labPreSaveChecks(who.patient_id, sel, null, who.patient))) return;
+        let r = await API.post('/api/lab/walkin', { ...who, ...rf.value(), test_ids: sel, doctor_id: drPick.get() || null, note: $('#rlNote', view).value });
         const disc = { discount: $('#rlDisc', view).value === '' ? undefined : $('#rlDisc', view).value, discount_pct: $('#rlPct', view).value, test_ids: sel };
         if (b.dataset.later) {
           r = await API.post('/api/lab/receive/' + r.id, { ...disc, paid: 0 });
@@ -306,6 +316,7 @@ Pages['rc-lab'] = {
           r = res.data; toast(`ثبت شد — ${r.lab_code}`, 'good');
           if (b.dataset.print) await printDoc(labReceiptsHTML(r), { size: 'receipt', title: r.lab_code });
         }
+        $$('#rlR [data-lf]', view).forEach(el => { if (el.type === 'checkbox') el.checked = false; else if (el.tagName === 'SELECT') el.selectedIndex = 0; else { el.value = ''; delete el.dataset.t; } });
         sel.length = 0; pt.reset(); drPick.set('', false); $('#rlNote', view).value = ''; $('#rlPct', view).value = 0; $('#rlDisc', view).value = ''; delete $('#rlPaid', view).dataset.t; calc(); loadToday();
       })
     });

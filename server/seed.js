@@ -53,6 +53,18 @@ const DEFAULT_SETTINGS = {
   // laboratory report print settings
   lab_font: 'Vazirmatn', lab_font_size: '12', lab_font_weight: 'normal', lab_line_height: '1.5', lab_row_padding: '3',
   lab_result_align: 'left', lab_grid: 'grid', lab_section_align: 'left', lab_patient_lang: 'fa', lab_show_print_time: '0', lab_show_signature: '1',
+  lab_letter_spacing: '0', lab_arrows: '1', lab_color_names: '1', lab_row_shade: '1', lab_diff_side: '1', lab_flags_box: '1',
+  lab_sign_left: 'Lab Technician', lab_sign_right: 'Lab in charge', lab_show_kit: '0', lab_show_prev: '0',
+  // laboratory reception / answer rules (from the lab's old program)
+  lab_answer_days: '1',                             // default answer date = today + N days (urgent → today)
+  lab_warn_repeat_day: '1',                         // warn when the same test was registered for the patient the same day
+  lab_discount_reason_required: '0',                // a discount needs a reason and the name of who gave it
+  lab_warn_dup_tazkira: '1',                        // warn when another patient has the same national ID (tazkira)
+  lab_prev_months: '6',                             // previous answers shown in result entry (months back)
+  lab_hide_cancelled: '1', lab_lock_approved: '1',
+  lab_receipt_answer_date: '1', lab_receipt_weekday: '1', lab_receipt_mobile: '1',
+  lab_label_lab_name: '1', lab_label_urgent: '1', lab_label_en_digits: '1', lab_label_archive: '0', lab_label_datetime: '1',
+  lab_discount_reasons: 'کارمند کلینیک\nفامیل کارمند\nمریض بی‌بضاعت\nسفارش داکتر\nتخفیف مدیر',
   // prescription print settings
   rx_font: 'Vazirmatn', rx_font_size: '13.5', rx_font_weight: 'normal', rx_line_height: '1.6'
 };
@@ -148,6 +160,16 @@ function ensureDefaults(db) {
         db.insert('medicines', { code: 1001 + i, name, generic, form, strength, unit: unitForForm(form), markup_pct: markup, reorder_level: 5 }));
     }
     if (!db.scalar('SELECT COUNT(*) FROM lab_tests')) seedLabCatalog(db);
+    if (!db.scalar('SELECT COUNT(*) FROM lab_reception_types')) {
+      db.insert('lab_reception_types', { name: 'عادی (آزاد)', code: 'FREE', price_basis: 'free', patient_pct: 100, sort: 1 });
+      db.insert('lab_reception_types', { name: 'بیمه (۷۰٪ سهم مؤسسه)', code: 'INS', price_basis: 'insurance', patient_pct: 30, org_name: 'بیمه', required_fields: JSON.stringify(['tazkira', 'phone']), sort: 2, active: 0 });
+      db.insert('lab_reception_types', { name: 'کارمند کلینیک', code: 'STAFF', price_basis: 'free', patient_pct: 100, discount_pct: 50, sort: 3 });
+    }
+    // differential counts print in the side column of the CBC (like the lab's previous report)
+    if (db.getSetting('lab_side_seeded', '0') !== '1') {
+      db.db.run("UPDATE lab_tests SET side_column=1 WHERE side_column IS NULL AND code IN ('NEUT%','LYMPH%','MONO%','EOS%','BASO%','BAND%')");
+      db.db.run("INSERT OR REPLACE INTO settings(key,value) VALUES('lab_side_seeded','1')");
+    }
   });
 }
 

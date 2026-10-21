@@ -271,7 +271,8 @@ async function createServer(opts = {}) {
   route('GET', '/api/lab/catalog', ({ user }) => {
     need(user, ...ROLES);
     return { departments: db.all('SELECT * FROM lab_departments ORDER BY sort, id'), tests: db.all('SELECT * FROM lab_tests ORDER BY sort, id'), test_items: db.all('SELECT ti.*, li.name item_name, li.unit FROM lab_test_items ti JOIN lab_items li ON li.id=ti.item_id'),
-      panel_items: db.all('SELECT * FROM lab_panel_items ORDER BY panel_id, sort'), ranges: db.all('SELECT * FROM lab_ranges') };
+      panel_items: db.all('SELECT * FROM lab_panel_items ORDER BY panel_id, sort'), ranges: db.all('SELECT * FROM lab_ranges'), kits: db.all('SELECT * FROM lab_kits ORDER BY test_id, id'),
+      reception_types: db.all('SELECT * FROM lab_reception_types ORDER BY sort, id'), referrers: db.all('SELECT * FROM lab_referrers WHERE active=1 ORDER BY name') };
   });
   route('GET', '/api/lab/req/:code', ({ user, params, query }) => { need(user, 'lab', 'doctor', 'stock', 'reception'); return ops.labFull(query.id ? Number(query.id) : decodeURIComponent(params.code)); });
   route('POST', '/api/lab/walkin', ({ user, body, req }) => { need(user, 'lab', 'reception'); const id = ops.createLabWalkin(body, user); audit(user, 'create', 'lab_request', id, 'walk-in', req); return ops.labFull(id); });
@@ -301,6 +302,16 @@ async function createServer(opts = {}) {
   route('POST', '/api/cashier/deposit', ({ user, body, req }) => { need(user, 'reception'); const b = db.transaction(() => ops.addDeposit(Number(body.patient_id), body.amount, body.method, body.note, user)); audit(user, 'deposit', 'patient', body.patient_id, String(body.amount), req); return b; });
   route('GET', '/api/cashier/day', ({ user, query }) => { need(user, 'reception', 'stock'); return ops.cashierDay(query.from || ops.today(), query.to); });
   route('POST', '/api/cashier/close', ({ user, body, req }) => { need(user, 'reception'); const c = ops.cashClose(body, user); audit(user, 'cash_close', 'cash', c.id, `${c.expected} / ${c.counted}`, req); return c; });
+
+  // laboratory: kits, ranges re-applied, repeat check, statistics, referring doctors' income, history
+  route('POST', '/api/lab/kit/save', ({ user, body, req }) => { need(user, 'lab'); const k = ops.saveLabKit(body, user); audit(user, body.remove ? 'delete' : 'save', 'lab_kit', body.remove || k?.id, `${body.name || ''} ${body.lot_no || ''}`, req); return k; });
+  route('POST', '/api/lab/apply-ranges', ({ user, body, req }) => { need(user, 'lab'); const r = ops.applyRanges(body, user); audit(user, 'apply_ranges', 'lab_test', body.test_id, `${body.from}..${body.to} ${r.changed}`, req); return r; });
+  route('GET', '/api/lab/repeat-check', ({ user, query }) => { need(user, 'lab', 'reception', 'doctor'); return ops.labRepeatCheck(Number(query.patient_id), String(query.test_ids || '').split(',').map(Number).filter(Boolean), Number(query.exclude || 0), query.days); });
+  route('GET', '/api/lab/stats', ({ user, query }) => { need(user, 'lab', 'stock', 'reception'); return ops.labStats(query); });
+  route('GET', '/api/lab/doctor-income', ({ user, query }) => { need(user, 'lab', 'stock', 'reception'); return ops.labDoctorIncome(query); });
+  route('GET', '/api/lab/history', ({ user, query }) => { need(user, 'lab', 'doctor'); return ops.labTestHistory(Number(query.patient_id), Number(query.test_id)); });
+  route('POST', '/api/lab/printed/:id', ({ user, params }) => { need(user, 'lab', 'reception', 'doctor'); db.run('UPDATE lab_requests SET print_count = IFNULL(print_count,0) + 1 WHERE id=?', [Number(params.id)]); return true; });
+  route('GET', '/api/patients/dup-tazkira', ({ user, query }) => { need(user, ...ROLES); const t = String(query.tazkira || '').trim(); if (!t) return []; return db.all('SELECT id, code, full_name, father_name FROM patients WHERE tazkira=? AND id<>?', [t, Number(query.id || 0)]); });
 
   // laboratory: sample taken, materials store
   route('POST', '/api/lab/sample/:id', ({ user, params, req }) => { need(user, 'lab'); db.update('lab_requests', Number(params.id), { sampled_at: ops.nowStr(), sampled_by: user.id }); audit(user, 'sample', 'lab_request', params.id, '', req); return ops.labFull(Number(params.id)); });

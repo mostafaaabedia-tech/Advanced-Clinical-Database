@@ -14,7 +14,7 @@ STATIONS = {
   'doctor': ('dr.abedi', '1111', ['dr-queue', 'encounter', 'rx-list', 'templates', 'dr-stats', 'patients', 'ipd', 'qdisplay']),
   'pharmacy': ('pharmacy', '1111', ['rx-inbox', 'pos', 'sales', 'ph-daily', 'medicines', 'med-sales', 'reorder']),
   'stock': ('stock', '1111', ['stock-dash', 'medicines', 'purchases', 'suppliers', 'expenses', 'withdrawals', 'daily', 'monthly', 'med-sales', 'reorder', 'lab-items', 'import', 'sales']),
-  'lab': ('lab', '1111', ['lab-inbox', 'lab-walkin', 'lab-list', 'lab-tests', 'lab-items', 'lab-sales']),
+  'lab': ('lab', '1111', ['lab-inbox', 'lab-walkin', 'lab-list', 'lab-tests', 'lab-items', 'lab-sales', 'lab-reports', 'lab-setup']),
 }
 errors = []
 with sync_playwright() as p:

@@ -134,6 +134,15 @@ class ClinicDatabase {
     add('encounters', 'diagnosis_code', 'TEXT');
     add('visit_payments', 'station', 'TEXT'); add('lab_payments', 'station', 'TEXT');
     add('lab_requests', 'sampled_at', 'TEXT'); add('lab_requests', 'sampled_by', 'INTEGER');
+    // v3 laboratory
+    for (const [c, d] of [['tat_days', 'REAL'], ['weekdays', 'TEXT'], ['sample_amount', 'TEXT'], ['tube', 'TEXT'], ['tube_sep', 'TEXT'], ['loinc', 'TEXT'], ['machine_code', 'TEXT'], ['price_ins', 'REAL'],
+      ['sendout_lab', 'TEXT'], ['sendout_cost', 'REAL'], ['default_answer', 'TEXT'], ['ready_answers', 'TEXT'], ['numeric_only', 'INTEGER'], ['critical_report', 'INTEGER'], ['sex_only', 'TEXT'],
+      ['possible_low', 'REAL'], ['possible_high', 'REAL'], ['side_column', 'INTEGER'], ['description', 'TEXT'], ['active_kit_id', 'INTEGER'], ['report_name', 'TEXT']]) add('lab_tests', c, d);
+    for (const [c, d] of [['kit_id', 'INTEGER'], ['alarm_low', 'REAL'], ['alarm_high', 'REAL'], ['crit_low', 'REAL'], ['crit_high', 'REAL'], ['min_valid', 'REAL'], ['max_valid', 'REAL']]) add('lab_ranges', c, d);
+    for (const [c, d] of [['fasting', 'TEXT'], ['clinical_notes', 'TEXT'], ['pregnant', 'INTEGER'], ['sample_flag', 'TEXT'], ['answer_date', 'TEXT'], ['reception_type_id', 'INTEGER'], ['org_share', 'REAL'],
+      ['referrer_id', 'INTEGER'], ['referrer', 'TEXT'], ['discount_reason', 'TEXT'], ['discount_by', 'TEXT'], ['print_count', 'INTEGER'], ['checked_by', 'INTEGER'], ['sendout', 'INTEGER']]) add('lab_requests', c, d);
+    add('lab_request_items', 'org_share', 'REAL'); add('lab_request_items', 'sendout_lab', 'TEXT');
+    add('lab_results', 'kit_id', 'INTEGER');
     if (v < SCHEMA_VERSION) {
       if (v >= 1 && v < 2) {
         // pharmacy payments were a single number before v2 → keep them as payment rows for the cash reports

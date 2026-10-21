@@ -177,11 +177,13 @@ function labReceiptHTML(r, copy) {
   return `<div class="doc receipt" style="--rw:${App.settings.receipt_width || 80}mm">${smallHead('رسید لابراتوار — ' + (patient ? 'نسخه مریض' : 'نسخه لابراتوار'))}
     ${rcRow('کد لابراتوار', `<span class="ltr">${esc(r.lab_code)}</span>`)}${rcRow('کد مریض', `<span class="ltr">${esc(r.patient_code)}</span>`)}
     ${rcRow('نام', esc(r.full_name))}${rcRow('ولد', esc(r.father_name || '—'))}${rcRow('سن / جنس', `${esc(ageLabel(r.birth_date))} / ${sexFa(r.sex)}`)}
-    ${r.doctor_name ? rcRow('داکتر', esc(r.doctor_name)) : ''}${rcRow('تاریخ', `<span class="ltr">${esc(fmtDateTimeNum(r.received_at || r.created_at))}</span>`)}
+    ${r.doctor_name ? rcRow('داکتر', esc(r.doctor_name)) : ''}${rcRow('تاریخ', `<span class="ltr">${App.settings.lab_receipt_weekday !== '0' ? esc(weekday(r.received_at || r.created_at)) + ' ' : ''}${esc(fmtDateTimeNum(r.received_at || r.created_at))}</span>`)}
+    ${r.reception_type ? rcRow('نوع پذیرش', esc(r.reception_type)) : ''}${App.settings.lab_receipt_mobile !== '0' && r.phone ? rcRow('تلفن', `<span class="ltr">${esc(r.phone)}</span>`) : ''}
+    ${App.settings.lab_receipt_answer_date !== '0' && r.answer_date ? `<div class="rcAnswer">تاریخ جوابدهی: <b>${esc(weekday(r.answer_date))} ${esc(fmtDateNum(r.answer_date))}</b>${r.urgent ? ' — عاجل' : ''}</div>` : ''}
     <table class="rcItems"><thead><tr><th>آزمایش</th>${patient ? '' : '<th>نمونه</th>'}<th>قیمت</th></tr></thead><tbody>
     ${(r.items || []).map(i => `<tr><td class="en">${esc((labTestCode(i.test_id) ? labTestCode(i.test_id) + ' — ' : '') + i.name)}</td>${patient ? '' : `<td class="en small">${esc((r.tests || []).find(t => t.id === i.test_id || t.panel_id === i.test_id)?.sample || '')}</td>`}<td class="c">${money(i.price)}</td></tr>`).join('')}
     </tbody></table>
-    ${rcRow('جمع کل', money(r.subtotal))}${r.discount ? rcRow('تخفیف', money(r.discount)) : ''}${rcRow('قابل پرداخت', money(r.net) + ' ' + currency(), 'big')}${rcPayRows(r.net, r.paid)}
+    ${rcRow('جمع کل', money(r.subtotal))}${r.org_share ? rcRow('سهم مؤسسه / بیمه', money(r.org_share)) : ''}${r.discount ? rcRow('تخفیف', money(r.discount)) : ''}${rcRow('قابل پرداخت', money(r.net) + ' ' + currency(), 'big')}${rcPayRows(r.net, r.paid)}
     <div class="rcCode">${bc(r.lab_code, 26)}</div>
     ${patient ? '<div class="rcNote">لطفاً این رسید را هنگام گرفتن نتایج همراه داشته باشید.</div>' : ''}
     ${rcFooter()}</div>`;
@@ -197,12 +199,17 @@ function tubeLabelsHTML(r) {
     if (!bySample.has(smp)) bySample.set(smp, []);
     bySample.get(smp).push(labTestCode(it.test_id) || it.name);
   }
-  const n = Math.max(1, Number(App.settings.lab_label_copies) || 1);
-  return [...bySample.entries()].flatMap(([smp, codes]) => Array.from({ length: n }, () => `<div class="doc tubeLabel" style="width:${w}mm;height:${h}mm">
-    <div class="tlTop"><b>${esc(r.full_name)}</b><span>${esc(ageLabel(r.birth_date))} ${r.sex === 'F' ? 'F' : 'M'}</span></div>
+  const S = App.settings, n = Math.max(1, Number(S.lab_label_copies) || 1);
+  const en = (x) => S.lab_label_en_digits === '0' ? x : String(x).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
+  const when = S.lab_label_datetime === '0' ? fmtDateNum(r.received_at || r.created_at) : fmtDateTimeNum(r.received_at || r.created_at);
+  const one = (smp, codes, title) => `<div class="doc tubeLabel" style="width:${w}mm;height:${h}mm">
+    <div class="tlTop"><b>${S.lab_label_urgent !== '0' && r.urgent ? '<span class="tlUrg">URGENT</span> ' : ''}${esc(r.full_name)}</b><span>${esc(ageLabel(r.birth_date))} ${r.sex === 'F' ? 'F' : 'M'}</span></div>
     <div class="tlCode">${bc(r.lab_code, Math.max(14, h * 1.6))}</div>
-    <div class="tlBot"><span class="ltr">${esc(r.lab_code)}</span><span class="ltr">${esc(smp)}</span><span class="ltr">${esc(fmtDateNum(r.received_at || r.created_at))}</span></div>
-    <div class="tlTests ltr">${esc(codes.join(' '))}</div></div>`)).join('');
+    <div class="tlBot"><span class="ltr">${esc(r.lab_code)}</span><span class="ltr">${esc(title || smp)}</span><span class="ltr">${esc(en(when))}</span></div>
+    <div class="tlTests ltr">${esc(codes.join(' '))}</div>${S.lab_label_lab_name !== '0' ? `<div class="tlLab">${esc(S.clinic_name || '')} ${esc((listSetting('clinic_phones')[0]) || '')}</div>` : ''}</div>`;
+  const labels = [...bySample.entries()].flatMap(([smp, codes]) => Array.from({ length: n }, () => one(smp, codes)));
+  if (S.lab_label_archive === '1') labels.push(one('', [...bySample.values()].flat(), 'بایگانی'));
+  return labels.join('');
 }
 function labReceiptsHTML(r) { return labReceiptHTML(r, 'lab') + labReceiptHTML(r, 'patient'); }
 
@@ -216,35 +223,53 @@ function labReportHTML(r) {
   const groups = new Map();
   for (const t of r.tests || []) {
     const v = res.get(t.id); if (!v || v.value === null || v.value === '') continue;
-    // flag and normal range are taken from the CURRENT ranges, so edits to the ranges always apply
+    // flag and normal range are taken from the CURRENT ranges of the result's kit, so edits to the ranges always apply
     let flag = v.flag, ref = v.ref;
     if (typeof resolveRange === 'function') { const rg = resolveRange(t, sex, ageDays); flag = computeFlag(t, v.value, rg); ref = refDisplay(t, rg) || v.ref || ''; }
     const panel = t.panel_id ? (r.items || []).find(i => i.test_id === t.panel_id) : null;
-    const g = panel ? panel.name : (t.dept_name || 'Tests');
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push({ t, v, flag, ref });
+    const dept = t.dept_name || 'Tests', g = panel ? panel.name : dept;
+    const key = dept + '|' + g;
+    if (!groups.has(key)) groups.set(key, { dept, title: panel ? g : null, rows: [] });
+    groups.get(key).rows.push({ t, v, flag, ref });
   }
   const grid = ['grid', 'lines', 'none'].includes(s.lab_grid) ? s.lab_grid : 'grid';
   const al = (x, d) => ['left', 'center', 'right'].includes(x) ? x : d;
-  const vars = `--lf:${cssFont(s.lab_font)};--lfs:${cssNum(s.lab_font_size, 12, 8, 22)}px;--lfw:${s.lab_font_weight === 'bold' ? 700 : 400};--llh:${cssNum(s.lab_line_height, 1.5, 1, 3)};--lrp:${cssNum(s.lab_row_padding, 3, 0, 14)}px;--lra:${al(s.lab_result_align, 'left')};--lsa:${al(s.lab_section_align, 'left')}`;
+  const vars = `--lf:${cssFont(s.lab_font)};--lfs:${cssNum(s.lab_font_size, 12, 8, 22)}px;--lfw:${s.lab_font_weight === 'bold' ? 700 : 400};--llh:${cssNum(s.lab_line_height, 1.5, 1, 3)};--lrp:${cssNum(s.lab_row_padding, 3, 0, 14)}px;--lra:${al(s.lab_result_align, 'left')};--lsa:${al(s.lab_section_align, 'left')};--lls:${cssNum(s.lab_letter_spacing, 0, -1, 4)}px`;
   const cls = (f) => ['H', 'HH', 'A'].includes(f) ? 'abn' : ['L', 'LL'].includes(f) ? 'low' : '';
-  const sec = [...groups.entries()].map(([g, rows]) => `<div class="rSec"><h3>${esc(g)}</h3><table class="rt2"><thead><tr><th style="width:36%">Test</th><th>Result</th><th>Unit</th><th>Reference range</th></tr></thead><tbody>
-    ${rows.map(({ t, v, flag, ref }) => `<tr><td>${esc(t.name)}</td><td class="v ${cls(flag)} ${t.result_type === 'memo' ? 'memo' : ''}">${esc(v.value)}${flag ? ` <span class="f">${esc(flag)}</span>` : ''}</td><td>${esc(v.unit || t.unit || '')}</td><td>${esc(ref || '')}</td></tr>
-      ${v.note ? `<tr class="cmt"><td colspan="4">↲ ${esc(v.note)}</td></tr>` : ''}`).join('')}</tbody></table></div>`).join('');
+  const arrows = s.lab_arrows !== '0', colorNames = s.lab_color_names !== '0', sideOn = s.lab_diff_side !== '0', showKit = s.lab_show_kit === '1';
+  const arrow = (f) => !arrows || !f ? '' : ['H', 'HH'].includes(f) ? '<span class="ar up">▲</span>' : ['L', 'LL'].includes(f) ? '<span class="ar dn">▼</span>' : '';
+  const nameOf = (t) => esc(t.report_name || t.name);
+  const rowHTML = ({ t, v, flag, ref }) => `<tr><td class="${colorNames ? 'n-' + cls(flag) : ''}">${nameOf(t)}${showKit && t.kit ? `<div class="kitL">${esc([t.kit.name, t.kit.method, t.kit.lot_no ? 'Lot ' + t.kit.lot_no : ''].filter(Boolean).join(' · '))}</div>` : ''}${t.sendout_lab ? `<div class="kitL">Referred to: ${esc(t.sendout_lab)}</div>` : ''}</td>
+    <td class="v ${cls(flag)} ${t.result_type === 'memo' ? 'memo' : ''}">${arrow(flag)}${esc(v.value)}${flag && (!arrows || ['HH', 'LL', 'A'].includes(flag)) ? ` <span class="f">${esc(flag)}</span>` : ''}</td><td>${esc(v.unit || t.unit || '')}</td><td>${esc(ref || '')}</td></tr>
+    ${v.note ? `<tr class="cmt"><td colspan="4">↲ ${esc(v.note)}</td></tr>` : ''}`;
+  // departments as boxed sections (Hematology, Serology …); a panel's sub-title inside; differential counts in a side column
+  const byDept = new Map(); for (const g of groups.values()) { if (!byDept.has(g.dept)) byDept.set(g.dept, []); byDept.get(g.dept).push(g); }
+  const sec = [...byDept.entries()].map(([dept, gs]) => `<div class="rSec ${s.lab_row_shade !== '0' ? 'shade' : ''}"><h3>${esc(dept)}</h3>${gs.map(g => {
+      const side = sideOn ? g.rows.filter(x => x.t.side_column) : [], main = sideOn ? g.rows.filter(x => !x.t.side_column) : g.rows;
+      const mainT = `<table class="rt2"><thead><tr><th style="width:36%">Test</th><th>Result</th><th>Unit</th><th>Reference range</th></tr></thead><tbody>${g.title ? `<tr class="pnl"><td colspan="4">${esc(g.title)}</td></tr>` : ''}${main.map(rowHTML).join('')}</tbody></table>`;
+      if (!side.length) return mainT;
+      const sideT = `<table class="rt2 sideT"><thead><tr><th colspan="2">Differential</th></tr></thead><tbody>${side.map(({ t, v, flag }) => `<tr><td class="${colorNames ? 'n-' + cls(flag) : ''}">${esc(String(t.report_name || t.name).replace(/\s*%\s*$/, ''))}</td><td class="v ${cls(flag)}">${arrow(flag)}${esc(v.value)} ${esc(v.unit || t.unit || '')}</td></tr>`).join('')}</tbody></table>`;
+      return `<div class="withSide">${mainT}${sideT}</div>`;
+    }).join('')}</div>`).join('');
   const fa = s.lab_patient_lang !== 'en';
   const ref = r.doctor_name || (r.source === 'walkin' ? (fa ? 'مراجعه مستقیم' : 'Self') : '—');
+  const ck = (on) => on ? '☑' : '☐';
+  const flags = s.lab_flags_box !== '0' ? `<div class="flagsRow ltr">${bc(r.lab_code, 18)}<span>${ck(r.fasting === 'fast')} Fast</span><span>${ck(r.fasting === 'nonfast')} Non Fast</span><span>${ck(r.urgent)} Urgent</span>${r.pregnant ? '<span>☑ Pregnant</span>' : ''}<span class="cn">Clinical Notes: ${esc(r.clinical_notes || '')}</span></div>` : '';
   const ptBox = fa
-    ? `<div class="ptBoxFa lbf"><div><span>نام مریض:</span> <b>${esc(r.full_name)}</b></div><div><span>ولد:</span> <b>${esc(r.father_name || '—')}</b></div><div><span>کد لابراتوار:</span> <b class="ltr">${esc(r.lab_code)}</b></div>
-      <div><span>سن / جنس:</span> <b>${esc(ageLabel(birth))} / ${sexFa(sex)}</b></div><div><span>کد مریض:</span> <b class="ltr">${esc(r.patient_code)}</b></div><div><span>تاریخ:</span> <b class="ltr">${esc(fmtDateNum(r.received_at || r.created_at))}</b></div>
-      <div><span>داکتر معالج:</span> <b>${esc(ref)}</b></div><div><span>تاریخ نتیجه:</span> <b class="ltr">${esc(fmtDateNum(r.approved_at || r.completed_at || new Date()))}</b></div><div>${bc(r.lab_code, 20)}</div></div>`
+    ? `<div class="ptBoxFa lbf"><div><span>نام مراجعه کننده:</span> <b>${esc(r.full_name)}</b></div><div><span>ولد:</span> <b>${esc(r.father_name || '—')}</b></div><div><span>شماره پذیرش:</span> <b class="ltr">${esc(r.lab_code)}</b></div>
+      <div><span>سن / جنس:</span> <b>${esc(ageLabel(birth))} / ${sexFa(sex)}</b></div><div><span>کد مریض:</span> <b class="ltr">${esc(r.patient_code)}</b></div><div><span>تاریخ پذیرش:</span> <b class="ltr">${esc(fmtDateTimeNum(r.received_at || r.created_at))}</b></div>
+      <div><span>پزشک معالج:</span> <b>${esc(ref)}</b></div>${r.phone ? `<div><span>تلفن:</span> <b class="ltr">${esc(r.phone)}</b></div>` : '<div></div>'}<div><span>تاریخ گزارش:</span> <b class="ltr">${esc(fmtDateTimeNum(r.approved_at || r.completed_at || new Date()))}</b></div>
+      ${flags ? `<div class="span3">${flags}</div>` : `<div>${bc(r.lab_code, 20)}</div>`}</div>`
     : `<div class="ptBoxEn lbf"><div><span>Name:</span> <b>${esc(r.full_name)}</b></div><div><span>Father:</span> <b>${esc(r.father_name || '—')}</b></div><div><span>Lab No:</span> <b>${esc(r.lab_code)}</b></div>
-      <div><span>Age / Sex:</span> <b>${esc(ageLabel(birth))} / ${sex === 'F' ? 'Female' : 'Male'}</b></div><div><span>Patient ID:</span> <b>${esc(r.patient_code)}</b></div><div><span>Date:</span> <b>${esc(fmtDateNum(r.received_at || r.created_at))}</b></div>
-      <div><span>Ref. Doctor:</span> <b>${esc(ref)}</b></div><div><span>Reported:</span> <b>${esc(fmtDateNum(r.approved_at || r.completed_at || new Date()))}</b></div><div>${bc(r.lab_code, 20)}</div></div>`;
+      <div><span>Age / Sex:</span> <b>${esc(ageLabel(birth))} / ${sex === 'F' ? 'Female' : 'Male'}</b></div><div><span>Patient ID:</span> <b>${esc(r.patient_code)}</b></div><div><span>Reception:</span> <b>${esc(fmtDateTimeNum(r.received_at || r.created_at))}</b></div>
+      <div><span>Ref. Doctor:</span> <b>${esc(ref)}</b></div>${r.phone ? `<div><span>Phone:</span> <b>${esc(r.phone)}</b></div>` : '<div></div>'}<div><span>Reported:</span> <b>${esc(fmtDateTimeNum(r.approved_at || r.completed_at || new Date()))}</b></div>
+      ${flags ? `<div class="span3">${flags}</div>` : `<div>${bc(r.lab_code, 20)}</div>`}</div>`;
+  const signL = s.lab_sign_left || s.lab_signature || 'Lab Technician', signR = s.lab_sign_right || 'Lab in charge';
   return `<div class="doc labDoc labDoc2 size-A4 grid-${grid}" style="${vars};position:relative">
     <table class="pageTable"><thead><tr><td>${clinicLetterhead()}<div class="docTitle">LABORATORY REPORT</div>${ptBox}</td></tr></thead>
     <tbody><tr><td class="lbf">${sec || '<p class="muted">No results.</p>'}
       ${r.report_note ? `<div class="rSec"><h3>Comment</h3><div class="commentBox">${esc(r.report_note)}</div></div>` : ''}
-      ${s.lab_show_signature !== '0' ? `<div class="signRow"><div>${esc(s.lab_signature || 'Laboratory')}</div><div>Pathologist</div></div>` : ''}
+      ${s.lab_show_signature !== '0' ? `<div class="signRow"><div>${esc(signL)}${r.checked_by_name ? `<br><small>${esc(r.checked_by_name)}</small>` : ''}</div><div>${esc(signR)}${r.approved_by_name ? `<br><small>${esc(r.approved_by_name)}</small>` : ''}</div></div>` : ''}
       ${s.lab_report_footer ? `<div class="labFootNote">${esc(s.lab_report_footer)}</div>` : ''}
       ${s.lab_show_print_time === '1' ? `<div class="docSub" style="margin-top:3mm">${esc(fmtDateTimeNum(new Date()))}</div>` : ''}</td></tr></tbody>
     <tfoot><tr><td><div class="footSpace"></div></td></tr></tfoot></table>

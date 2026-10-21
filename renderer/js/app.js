@@ -51,6 +51,8 @@ const NAV = [
   ['lab-list', 'آزمایش‌ها و نتایج', 'list', ['lab'], 'lab'],
   ['lab-tests', 'لیست آزمایش‌ها و قیمت', 'flask', ['lab'], 'lab'],
   ['lab-items', 'موجودی مواد لابراتوار', 'box', ['lab', 'stock'], 'lab'],
+  ['lab-reports', 'آمار مراجعین و درآمد داکتران', 'chart', ['lab', 'stock', 'reception'], 'lab'],
+  ['lab-setup', 'انواع پذیرش و داکتران معرف', 'list', ['lab', 'reception'], 'lab'],
   ['lab-sales', 'فروش لابراتوار', 'chart', ['lab'], 'lab'],
 
   ['local', 'تنظیمات این کمپیوتر', 'settings', ALL_ROLES, 'local']
