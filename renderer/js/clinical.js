@@ -76,3 +76,47 @@ function cdssCheck({ items = [], patient = {}, testIds = [], recentLabs = [], ca
   }
   return [...new Set(out)];
 }
+
+// ================================================================ prescription wording in English (Sig: 1 × 4 / day)
+// old Persian list values (saved in earlier prescriptions) are translated when printed
+const RX_EN = {
+  'روزانه یک بار': '1 / day', 'روزانه دو بار': '2 / day', 'روزانه سه بار': '3 / day', 'روزانه چهار بار': '4 / day',
+  'هر ۶ ساعت': 'every 6 h', 'هر ۸ ساعت': 'every 8 h', 'هر ۱۲ ساعت': 'every 12 h', 'هر ۴ ساعت': 'every 4 h', 'صبح‌ها': 'every morning', 'شب‌ها': 'every night',
+  'یک روز در میان': 'alternate days', 'دو روز در میان': 'every 3rd day', 'هفته یک بار': 'once a week', 'هفته دو بار': 'twice a week', 'در صورت ضرورت': 'when needed (PRN)', 'یک دفعه': 'once (STAT)',
+  'بعد از غذا': 'After meal', 'قبل از غذا': 'Before meal', 'همراه غذا': 'With meal', 'ناشتا': 'Empty stomach', 'قبل از خواب': 'At bedtime',
+  'خوراکی': 'Oral', 'زیر زبانی': 'Sublingual', 'عضلی (IM)': 'IM', 'وریدی (IV)': 'IV', 'زیر جلدی': 'SC', 'موضعی': 'Topical', 'مهبلی': 'Vaginal', 'مقعدی': 'Rectal', 'استنشاقی': 'Inhalation', 'چشمی': 'Eye', 'گوش': 'Ear', 'بینی': 'Nasal',
+  'روز': 'days', 'شب': 'nights', 'هفته': 'weeks', 'ماه': 'months'
+};
+const rxEn = (v) => { const s = String(v ?? '').trim(); return RX_EN[s] || s; };
+// times per day of a frequency (English or Persian)
+const FREQ_PER_DAY = [[/^\s*(\d+)\s*(?:×|x)?\s*\/\s*day/i, null], [/every\s*4\s*h/i, 6], [/every\s*6\s*h/i, 4], [/every\s*8\s*h/i, 3], [/every\s*12\s*h/i, 2], [/morning|night|once a day|daily|1\s*\/\s*day/i, 1],
+  [/alternate/i, 1 / 2], [/every 3rd day|every 2 days/i, 1 / 3], [/twice a week/i, 2 / 7], [/once a week|weekly/i, 1 / 7]];
+function rxTimesPerDay(f) {
+  const s = rxEn(f);
+  for (const [re, n] of FREQ_PER_DAY) { const m = s.match(re); if (m) return n === null ? Number(m[1]) : n; }
+  return null;
+}
+// how many days the medicine is taken, from duration + unit (alternate days, selected dates …)
+function rxDays(it) {
+  const u = rxEn(it.duration_unit || 'days').toLowerCase(), d = Number(it.duration || 0);
+  if (/date/.test(u)) return String(it.dates || '').split(',').filter(Boolean).length;
+  if (/week/.test(u)) return d * 7;
+  if (/month/.test(u)) return d * 30;
+  return d;
+}
+// "1 × 4 / day" · "5 ml every 8 h" · "1 · when needed (PRN)"
+function rxSigEn(it) {
+  const f = rxEn(it.frequency), dose = String(it.dose || '').trim() || '1';
+  if (!f) return dose;
+  const m = f.match(/^\s*(\d+)\s*\/\s*day/i);
+  if (m) return `${dose} × ${m[1]} / day`;
+  return `${dose} · ${f}`;
+}
+function rxDurationEn(it) {
+  const u = rxEn(it.duration_unit || 'days');
+  if (/date/i.test(u)) { const ds = String(it.dates || '').split(',').filter(Boolean); return ds.length ? ds.map(d => fmtDateNum(d).slice(5)).join(', ') : ''; }
+  if (!it.duration) return '';
+  const n = fmtNum(it.duration);
+  if (/alternate|every 2 days|every 3rd/i.test(u)) return `${n} days (${u})`;
+  return `${n} ${Number(it.duration) === 1 ? u.replace(/s$/, '') : u}`;
+}

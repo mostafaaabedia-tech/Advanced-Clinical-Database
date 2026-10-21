@@ -18,6 +18,7 @@ async function call(token, method, url, body) {
 const login = async (u, p, station) => (await call(null, 'POST', '/api/login', { username: u, password: p, station })).token;
 const ok = (m) => console.log('  ✓', m);
 
+const r2 = (x) => Math.round(Number(x) * 100) / 100;
 (async () => {
   srv = await createServer({ dataDir: dir, port: 0 + 8790, discovery: false, log: () => { } });
   base = `http://127.0.0.1:${srv.port}`;
@@ -185,6 +186,23 @@ const ok = (m) => console.log('  ✓', m);
   const dash = await call(A, 'GET', '/api/reports/dashboard'); assert.ok(dash.stock.items > 0); ok('admin dashboard');
   const msales = await call(S, 'GET', `/api/reports/medicine-sales?from=${t}&to=${t}`); assert.equal(msales.length, 2); ok('medicine sales report');
   const sup = await call(S, 'GET', '/api/reports/suppliers'); assert.equal(sup[0].balance, 200); ok('supplier ledger balance 200');
+
+  // v1.3: withdrawals by type — pharmacy factor payment from the drawer, lab personal / external tests, monthly account fields
+  const openF = await call(P, 'GET', '/api/open-purchases'); assert.ok(openF.length > 0 && openF[0].balance >= 50); const f0 = openF[0];
+  const wdF = await call(P, 'POST', '/api/save/withdrawals', { section: 'pharmacy', kind: 'factor', purchase_id: f0.id, amount: 50, by_whom: 'mostafa' });
+  let pAfter = (await call(S, 'GET', '/api/open-purchases')).find(x => x.id === f0.id); assert.equal(r2(pAfter ? pAfter.balance : 0), r2(f0.balance - 50)); ok('pharmacy withdrawal for a factor is recorded as a factor payment');
+  await assert.rejects(call(P, 'POST', '/api/save/withdrawals', { section: 'pharmacy', kind: 'factor', purchase_id: f0.id, amount: 999999 }), /بیشتر از باقی/); ok('factor withdrawal cannot exceed the factor balance');
+  await assert.rejects(call(P, 'POST', '/api/save/withdrawals', { section: 'lab', kind: 'personal', amount: 10 }), /دواخانه فقط/); ok('pharmacy cannot take money from the lab');
+  await call(R, 'POST', '/api/save/withdrawals', { section: 'lab', kind: 'personal', amount: 70, by_whom: 'mostafa' });
+  await call(R, 'POST', '/api/save/withdrawals', { section: 'lab', kind: 'external', amount: 30, person: 'لابراتوار بیرونی', note: 'HbA1c ارسالی' });
+  const d1 = (await call(S, 'GET', `/api/reports/days?from=${t}&to=${t}`))[0];
+  assert.equal(d1.wd_ph_factor, 50); assert.equal(d1.wd_lab_personal, 70); assert.equal(d1.wd_lab_external, 30); assert.equal(d1.wd_ph_other, 100);
+  ok(`withdrawals by type: pharmacy factor ${d1.wd_ph_factor}, other ${d1.wd_ph_other}; lab personal ${d1.wd_lab_personal}, external ${d1.wd_lab_external}`);
+  const rd = (await call(R, 'GET', `/api/reports/days?from=${t}&to=${t}`))[0]; assert.equal(rd.wd_lab_external, 30); assert.equal(rd.ph_net, undefined); ok('reception sees the lab money and lab withdrawals, not the pharmacy');
+  await call(P, 'POST', '/api/delete/withdrawals/' + wdF);
+  pAfter = (await call(S, 'GET', '/api/open-purchases')).find(x => x.id === f0.id); assert.equal(r2(pAfter.balance), r2(f0.balance)); ok('deleting the withdrawal removes the factor payment');
+  const dd = await call(R, 'GET', `/api/reports/doctor-daily?from=${t}&to=${t}`); assert.ok(dd.length > 0 && dd[0].turns > 0); ok(`doctor daily turns: ${dd.map(x => x.name + ' ' + x.turns + ' (last ' + x.last_turn + ')').join(', ')}`);
+  const settingsNow = srv.db.allSettings ? srv.db.allSettings() : Object.fromEntries(srv.db.all('SELECT key, value FROM settings').map(r => [r.key, r.value])); assert.ok(/1 \/ day/.test(settingsNow.rx_frequencies) && /selected dates/.test(settingsNow.rx_duration_units) && !/روزانه/.test(settingsNow.rx_frequencies)); ok('prescription lists are in English (1 / day …, selected dates)');
 
   // excel import
   const xl = process.argv[2];

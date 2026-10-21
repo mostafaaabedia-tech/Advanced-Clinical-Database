@@ -44,8 +44,8 @@ const RESOURCES = {
   sales: { table: 'sales', view: 'v_sales', read: ['pharmacy', 'stock', 'reception'], write: [], del: [], search: ['sale_code', 'rx_code', 'patient_name', 'patient_code'], order: 'id DESC', dateCol: 'date' },
   expenses: { table: 'expenses', view: 'v_expenses', read: ['stock'], write: ['stock'], del: ['stock'], search: ['item', 'category', 'by_whom', 'vendor', 'factor_no', 'note'], order: 'date DESC, id DESC', dateCol: 'date',
     cols: ['date', 'category', 'item', 'qty', 'unit_price', 'amount', 'paid', 'section', 'factor_no', 'vendor', 'by_whom', 'note'] },
-  withdrawals: { table: 'withdrawals', read: ['stock', 'pharmacy', 'reception'], write: ['stock', 'pharmacy', 'reception'], del: ['stock'], search: ['by_whom', 'note'], order: 'date DESC, id DESC', dateCol: 'date',
-    cols: ['date', 'section', 'kind', 'amount', 'by_whom', 'note'] },
+  withdrawals: { table: 'withdrawals', custom: 'withdrawal', read: ['stock', 'pharmacy', 'reception'], write: ['stock', 'pharmacy', 'reception'], del: ['stock', 'pharmacy', 'reception'], search: ['by_whom', 'note', 'person', 'factor_no'], order: 'date DESC, id DESC', dateCol: 'date',
+    cols: ['date', 'section', 'kind', 'amount', 'by_whom', 'person', 'purchase_id', 'factor_no', 'note'] },
   legacy_daily: { table: 'legacy_daily', key: 'date', read: ['stock'], write: ['stock'], del: ['stock'], order: 'date DESC', dateCol: 'date', cols: ['date', 'pharmacy_sales', 'lab_income', 'note'] },
   audit_log: { table: 'audit_log', read: [], write: [], del: [], search: ['username', 'action', 'entity', 'detail', 'station'], order: 'id DESC', dateCol: 'DATE(at)' }
 };
@@ -94,6 +94,7 @@ function makeResources(db, ops) {
     if (!allowed(R.write, user)) throw new ops.UserError('دسترسی ندارید');
     if (R.custom === 'patient') return ops.savePatient(data, user);
     if (R.custom === 'medicine') return ops.saveMedicine(data, user);
+    if (R.custom === 'withdrawal') return ops.saveWithdrawal(data, user);
     const key = R.key || 'id';
     const row = {};
     for (const c of R.cols) if (c in data) row[c] = data[c] === '' ? null : (typeof data[c] === 'boolean' ? (data[c] ? 1 : 0) : data[c]);
@@ -120,6 +121,7 @@ function makeResources(db, ops) {
     const R = RESOURCES[name]; if (!R) throw new ops.UserError('منبع نامعتبر');
     if (!allowed(R.del, user)) throw new ops.UserError('دسترسی ندارید');
     const key = R.key || 'id';
+    if (R.custom === 'withdrawal') return ops.deleteWithdrawal(Number(id), user);
     const old = db.get(`SELECT * FROM ${R.table} WHERE ${key} = ?`, [id]);
     if (!old) return false;
     if (R.own && user.role === 'doctor' && old[R.own] && old[R.own] !== user.doctor_id) throw new ops.UserError('دسترسی ندارید');

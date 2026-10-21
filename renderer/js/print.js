@@ -116,15 +116,15 @@ function rxDocHTML({ enc = {}, rx, lab, patient, visit, doctor, opts }) {
         ${ptRow('نام مریض', esc(patient.full_name), 'w2')}${ptRow('ولد', esc(patient.father_name))}${ptRow('سن', esc(ageLabel(patient.birth_date)))}${ptRow('جنس', sexFa(patient.sex))}
         ${ptRow('کد مریض', `<span class="ltr">${esc(patient.code)}</span>`)}${o.weight !== 0 && (enc.weight || visit?.weight) ? ptRow('وزن', `<span class="ltr">${esc(enc.weight || visit.weight)} kg</span>`) : ''}${o.weight !== 0 && (enc.height || visit?.height) ? ptRow('قد', `<span class="ltr">${esc(enc.height || visit.height)} cm</span>`) : ''}${ptRow('تاریخ', `<span class="ltr">${esc(fmtDateNum(rx?.date || enc.date || new Date()))}</span>`)}
         ${rx ? ptRow('کد نسخه', `<span class="ltr rxCode">${esc(rx.rx_code)}</span>`) : ''}
-        ${o.barcode && rx ? `<div class="rxBarcode">${bc(rx.rx_code, 26)}</div>` : ''}
+        ${o.barcode && rx ? `<div class="rxBarcode">${bc(rx.rx_code, 18)}</div>` : ''}
       </div>
       ${o.vitals && vit.length ? `<div class="rxVitals">${vit.map(([k, v]) => `<span><b>${k}:</b> <span class="ltr">${esc(v)}</span></span>`).join('')}</div>` : ''}
       ${clin.length ? `<div class="rxClin">${clin.map(([k, v]) => `<div><b>${esc(k)}:</b> <span>${esc(v)}</span></div>`).join('')}</div>` : ''}
       ${items.length ? `<div class="rxSym">R<sub>x</sub></div>
-      <table class="rxTable"><thead><tr><th>#</th><th class="en">Medicine</th><th>شکل</th><th>قوت</th><th>مقدار</th><th>دفعات مصرف</th><th>زمان</th><th>مدت</th><th>تعداد</th></tr></thead>
-      <tbody>${items.map((it, i) => `<tr><td class="c">${i + 1}</td><td class="en med">${esc(it.name)}</td><td class="en">${esc(it.form || '')}</td><td class="en">${esc([it.strength, it.unit].filter(Boolean).join(' '))}</td>
-        <td class="c">${esc(it.dose || '')}</td><td>${esc(it.frequency || '')}${it.route ? ` <small>(${esc(it.route)})</small>` : ''}</td><td>${esc(it.timing || '')}</td><td>${it.duration ? `${esc(fmtNum(it.duration))} ${esc(it.duration_unit || '')}` : ''}</td><td class="c"><b>${it.qty ? esc(fmtNum(it.qty)) : ''}</b></td></tr>
-        ${it.note ? `<tr class="noteRow"><td></td><td colspan="8">↲ ${esc(it.note)}</td></tr>` : ''}`).join('')}</tbody></table>` : ''}
+      <table class="rxTable"><thead><tr><th>#</th><th>Medicine</th><th>Form</th><th>Strength</th><th>Dose × Frequency</th><th>Timing</th><th>Duration</th><th>Qty</th></tr></thead>
+      <tbody>${items.map((it, i) => `<tr><td class="c">${i + 1}</td><td class="med">${esc(it.name)}</td><td>${esc(it.form || '')}</td><td>${esc([it.strength, it.unit].filter(Boolean).join(' '))}</td>
+        <td class="sig">${esc(rxSigEn(it))}${it.route ? ` <small>(${esc(rxEn(it.route))})</small>` : ''}</td><td>${esc(rxEn(it.timing))}</td><td>${esc(rxDurationEn(it))}</td><td class="c"><b>${it.qty ? esc(fmtNum(it.qty)) : ''}</b></td></tr>
+        ${it.note ? `<tr class="noteRow"><td></td><td colspan="7"><bdi>↳ ${esc(it.note)}</bdi></td></tr>` : ''}`).join('')}</tbody></table>` : ''}
       ${o.print_note && (enc.print_note || rx?.note) ? `<div class="rxNote"><b>توصیه داکتر:</b> ${esc([enc.print_note, rx?.note].filter(Boolean).join(' — '))}</div>` : ''}
       ${labItems.length ? `<div class="rxLabs"><b>آزمایش‌های لازم ${lab.lab_code ? `<span class="ltr">(${esc(lab.lab_code)})</span>` : ''}:</b> <span class="en">${labItems.map(x => esc(x.name)).join(' · ')}</span></div>` : ''}
       ${o.next_visit && enc.next_visit ? `<div class="rxNext"><b>مراجعه بعدی:</b> ${esc(fmtDate(enc.next_visit))}</div>` : ''}
@@ -159,7 +159,7 @@ function saleReceiptHTML(sale, copy) {
     ${rcRow('تاریخ', `<span class="ltr">${esc(fmtDateNum(sale.date))} ${esc(fmtTime(sale.created_at))}</span>`)}
     <table class="rcItems"><thead><tr><th>دوا</th><th>تعداد</th><th>قیمت</th><th>جمع</th></tr></thead><tbody>
     ${items.map(i => `<tr><td class="en">${esc(i.name)}${!patient && i.med_code ? ` <small>#${i.med_code}</small>` : ''}</td><td class="c">${fmtNum(i.qty)}</td><td class="c">${money(i.price)}</td><td class="c">${money(i.total)}</td></tr>
-      ${patient && (i.dose || i.frequency || i.timing) ? `<tr class="use"><td colspan="4">طریقه مصرف: ${esc([i.dose ? i.dose + ' ' + (i.unit || '') : '', i.frequency, i.timing, i.duration ? i.duration + ' ' + (i.duration_unit || '') : ''].filter(Boolean).join(' · '))}${i.rx_note ? ' — ' + esc(i.rx_note) : ''}</td></tr>` : ''}
+      ${patient && (i.dose || i.frequency || i.timing) ? `<tr class="use"><td colspan="4"><span class="en">${esc([rxSigEn(i), rxEn(i.timing), rxDurationEn(i)].filter(Boolean).join(' · '))}</span>${i.rx_note ? ' — ' + esc(i.rx_note) : ''}</td></tr>` : ''}
       ${i.returned_qty ? `<tr class="use"><td colspan="4">برگشت: ${fmtNum(i.returned_qty)}</td></tr>` : ''}`).join('')}
     </tbody></table>
     ${rcRow('جمع کل', money(sale.subtotal))}${sale.discount ? rcRow(`تخفیف (${fmtNum(sale.discount_pct, 0)}٪)`, money(sale.discount)) : ''}

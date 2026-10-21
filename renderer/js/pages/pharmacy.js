@@ -70,7 +70,7 @@ Pages.pos = {
       linesEl.innerHTML = st.lines.map((l, i) => {
         const short = l.med && l.qty > l.med.stock;
         return `<tr class="${short ? 'short' : ''}" data-i="${i}"><td class="c"><input type="checkbox" data-f="on" ${l.on ? 'checked' : ''} style="width:auto"></td>
-          <td>${l.rx ? `<div class="en"><b>${esc(l.rx.name)}</b> <small>${esc([l.rx.form, l.rx.strength, l.rx.unit].filter(Boolean).join(' '))}</small></div><small class="muted">${esc([l.rx.dose, l.rx.frequency, l.rx.timing, l.rx.duration ? l.rx.duration + ' ' + (l.rx.duration_unit || '') : ''].filter(Boolean).join(' · '))}${l.rx.qty ? ' — تعداد نسخه: ' + fmtNum(l.rx.qty) : ''}${l.dispensed ? ' — قبلاً: ' + fmtNum(l.dispensed) : ''}</small>` : '<small class="muted">اضافه (بدون نسخه)</small>'}</td>
+          <td>${l.rx ? `<div class="en"><b>${esc(l.rx.name)}</b> <small>${esc([l.rx.form, l.rx.strength, l.rx.unit].filter(Boolean).join(' '))}</small></div><small class="muted en">${esc([rxSigEn(l.rx), rxEn(l.rx.timing), rxDurationEn(l.rx)].filter(Boolean).join(' · '))}${l.rx.qty ? ' — تعداد نسخه: ' + fmtNum(l.rx.qty) : ''}${l.dispensed ? ' — قبلاً: ' + fmtNum(l.dispensed) : ''}</small>` : '<small class="muted">اضافه (بدون نسخه)</small>'}</td>
           <td class="medCell">${l.med ? `<b>${esc(l.med.name)}</b> <small class="muted">#${l.med.code} ${esc(l.med.strength || '')}</small>` : '<span class="neg">در لیست دواخانه پیدا نشد</span>'}<br><button class="btn sm ghost" data-pick="${i}">${icon('search', 12)} ${l.med ? 'تغییر' : 'انتخاب دوا'}</button>
             ${(!l.med || l.med.stock <= 0) && (l.alts || []).length ? `<div class="altHint">جایگزین موجود (همان ماده): ${l.alts.map((a, k) => `<a href="#" data-alt="${i}:${k}">${esc(a.name)} ${esc(a.strength || '')} (${fmtNum(a.stock)})</a>`).join(' · ')}</div>` : ''}
             ${l.med && l.med.stock <= 0 && !l.alts ? `<a href="#" class="altHint" data-findalt="${i}">جستجوی جایگزین</a>` : ''}</td>
@@ -231,16 +231,48 @@ Pages['ph-daily'] = {
   },
   onEvent(m) { if (m.type.startsWith('sale') && this._load) this._load(); }
 };
+// withdrawal types of each section
+const WD_KINDS = {
+  pharmacy: [['personal', 'برداشت شخصی'], ['factor', 'پرداخت فاکتور (کمپنی)'], ['person', 'برای شخص (معاش، قرض…)'], ['business', 'سایر مصارف']],
+  lab: [['personal', 'برداشت شخصی'], ['external', 'معاینات بیرونی (آزمایش ارسالی)'], ['business', 'سایر']],
+  reception: [['personal', 'برداشت شخصی'], ['business', 'سایر']]
+};
+const wdKindName = (sec, k) => (WD_KINDS[sec] || []).concat([['business', 'عادی'], ['personal', 'شخصی']]).find(x => x[0] === k)?.[1] || k || 'عادی';
+// sections a station may take money from
+const wdSectionsFor = () => App.user.role === 'pharmacy' ? ['pharmacy'] : App.user.role === 'reception' ? ['lab', 'reception'] : ['pharmacy', 'lab', 'reception'];
 function withdrawalDialog(section, after, row) {
-  row = row || { date: today(), section, kind: 'business' };
-  const m = modal({ title: row.id ? 'ویرایش برداشت' : 'ثبت برداشت از صندوق', body: `<div class="formGrid" id="wdF">
+  const secs = wdSectionsFor();
+  row = row || { date: today(), section: secs.includes(section) ? section : secs[0], kind: 'personal' };
+  const m = modal({ title: row.id ? 'ویرایش برداشت' : 'ثبت برداشت از صندوق', size: 'wide', body: `<div class="formGrid" id="wdF">
     <label class="field"><span>تاریخ</span>${dateInput('date', row.date)}</label>
-    <label class="field"><span>بخش</span><select name="section">${opt([['pharmacy', 'دواخانه'], ['lab', 'لابراتوار'], ['reception', 'پذیرش']], row.section)}</select></label>
-    <label class="field"><span>نوع</span><select name="kind">${opt([['business', 'برداشت عادی'], ['personal', 'برداشت شخصی']], row.kind)}</select></label>
-    <label class="field"><span>مبلغ</span><input type="number" name="amount" value="${esc(row.amount || '')}"></label>
+    <label class="field"><span>از صندوق</span><select name="section">${opt(secs.map(s => [s, SECTIONS[s]]), row.section)}</select></label>
+    <label class="field"><span>نوع برداشت</span><select name="kind" id="wdKind"></select></label>
+    <label class="field"><span>مبلغ</span><input type="number" name="amount" min="0" value="${esc(row.amount || '')}"></label>
+    <label class="field hidden" id="wdFac"><span>فاکتور خرید (باقی‌دار)</span><select name="purchase_id" id="wdPur"><option value="">— انتخاب فاکتور —</option></select></label>
+    <label class="field" id="wdPer"><span id="wdPerL">برای چه کسی</span><input name="person" value="${esc(row.person || '')}" placeholder="نام شخص / کمپنی / لابراتوار بیرونی"></label>
     <label class="field"><span>برداشت توسط</span><input name="by_whom" value="${esc(row.by_whom || App.user.full_name || '')}"></label>
-    <label class="field full"><span>یادداشت</span><input name="note" value="${esc(row.note || '')}"></label></div>`,
+    <label class="field full"><span>یادداشت / علت</span><input name="note" value="${esc(row.note || '')}"></label></div>
+    <div class="mini muted" id="wdHint" style="margin-top:8px"></div>`,
     foot: `<button class="btn primary" id="wd_ok">ذخیره</button><button class="btn" data-x>انصراف</button>` });
+  const secSel = $('[name="section"]', m.el), kindSel = $('#wdKind', m.el);
+  let purchases = null;
+  const loadPur = async () => {
+    if (purchases) return; purchases = await API.get('/api/open-purchases').catch(() => []);
+    if (row.purchase_id && !purchases.some(p => p.id === row.purchase_id)) purchases.unshift({ id: row.purchase_id, ref_no: row.factor_no || '#' + row.purchase_id, supplier_name: row.person || '', balance: 0 });
+    $('#wdPur', m.el).innerHTML = '<option value="">— انتخاب فاکتور —</option>' + purchases.map(p => `<option value="${p.id}" ${p.id === row.purchase_id ? 'selected' : ''}>${esc(p.factor_no || p.ref_no)} · ${esc(p.supplier_name || '')} · باقی ${money(p.balance)}</option>`).join('');
+  };
+  const sync = () => {
+    const sec = secSel.value, cur = kindSel.value || row.kind;
+    kindSel.innerHTML = opt(WD_KINDS[sec], WD_KINDS[sec].some(k => k[0] === cur) ? cur : WD_KINDS[sec][0][0]);
+    const k = kindSel.value;
+    $('#wdFac', m.el).classList.toggle('hidden', k !== 'factor');
+    $('#wdPerL', m.el).textContent = k === 'factor' ? 'کمپنی' : k === 'external' ? 'لابراتوار بیرونی / آزمایش' : k === 'personal' ? 'برای چه کسی (شخصی)' : 'برای چه کسی';
+    $('#wdHint', m.el).textContent = k === 'factor' ? 'این مبلغ به‌عنوان پرداخت همین فاکتور هم ثبت می‌شود (در حساب ماهوار زیر «فاکتورها» حساب می‌شود، دوباره از فروش کم نمی‌شود).'
+      : k === 'external' ? 'پولی که برای آزمایش‌های ارسالی به لابراتوار بیرونی داده شده.' : '';
+    if (k === 'factor') loadPur();
+  };
+  secSel.onchange = sync; kindSel.onchange = sync; sync();
+  $('#wdPur', m.el).onchange = () => { const p = (purchases || []).find(x => x.id === Number($('#wdPur', m.el).value)); if (p) { $('[name="person"]', m.el).value = p.supplier_name || ''; if (!$('[name="amount"]', m.el).value) $('[name="amount"]', m.el).value = p.balance; } };
   $('[data-x]', m.el).onclick = m.close;
   $('#wd_ok', m.el).onclick = () => busy($('#wd_ok', m.el), async () => { const v = formValues($('#wdF', m.el)); if (row.id) v.id = row.id; await API.save('withdrawals', v); toast('ثبت شد', 'good'); m.close(); after && after(); }).catch(errToast);
 }

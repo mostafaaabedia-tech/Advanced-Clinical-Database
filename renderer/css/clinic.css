@@ -260,3 +260,29 @@ table.posT .medCell { direction: ltr; text-align: left; }
 .rxItems { overflow-x: auto; }
 .rxItems > * { min-width: 980px; }
 .rxItems .rxAdd { min-width: 0; }
+
+/* v1.3: compact patient box, English prescription table (left to right) */
+.rxPtBox { grid-template-columns: repeat(5, 1fr); gap: .6mm 3mm; padding: 1.6mm 3mm; border-radius: 5px; }
+.rxPt { gap: 4px; padding-bottom: .4mm; }
+.rxPt span { font-size: 10px; }
+.rxPt b { font-size: 11.5px; }
+.rxPt .rxCode, .rxCode.ltr { font-size: 11.5px; }
+.rxBarcode { grid-column: auto; grid-row: 1 / span 2; grid-column-end: -1; margin: 0; height: 7mm; text-align: left; }
+.rxBarcode svg { height: 7mm; }
+.rxVitals { margin-top: 1.5mm; padding: 1mm 3mm; font-size: 11.5px; gap: 1.5mm 5mm; }
+.rxClin { margin-top: 1.5mm; font-size: 12px; line-height: 1.6; }
+.rxSym { margin-top: 2mm; }
+.rxTable { direction: ltr; text-align: left; }
+.rxTable th { text-align: left; }
+.rxTable td.sig { font-weight: 700; white-space: nowrap; }
+.rxTable tr.noteRow td { direction: auto; }
+.rxItem .rxNoteIn { display: flex; gap: 8px; align-items: center; }
+.rxItem .rxNoteIn input { flex: 1; }
+.rxItem .sigPrev { direction: ltr; font-size: 12px; font-weight: 700; color: var(--brand); background: var(--brand-soft, #eef4fb); border-radius: 6px; padding: 3px 8px; white-space: nowrap; }
+
+.maSum td { padding: 9px 12px; }
+.maSum tr.big td { font-weight: 700; font-size: 15px; }
+.maSum tr.neg td:last-child { color: var(--bad); }
+.maSum tr.total td { font-weight: 800; font-size: 16px; border-top: 2px solid var(--text-2); background: var(--surface-2); }
+.maSum tr.total.pos td:last-child { color: var(--good); }
+.rxHist td { vertical-align: top; }

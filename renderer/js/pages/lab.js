@@ -290,8 +290,9 @@ Pages['lab-walkin'] = {
         <div class="secTitle" style="margin-top:12px">${icon('steth', 15)} داکتر کلینیک (اگر از کلینیک فرستاده شده)</div>${doctorPickerHTML('wDr', { placeholder: 'بیرونی / بدون داکتر' })}
         <div class="secTitle" style="margin-top:12px">${icon('flask', 15)} معلومات پذیرش</div>${labReceptionFieldsHTML('wR', {}, cat)}</div>
       <div class="card"><h2>${icon('flask')} آزمایش‌ها <small class="muted">— مخفف آزمایش؛ موس را نگه دارید تا نام کامل دیده شود</small></h2><div class="searchBox"><input id="wt" placeholder="مخفف، نام یا نمبر آزمایش… (Enter = افزودن)" autocomplete="off"></div>
+        <div class="pickWrap" data-fold="walkin"><button type="button" class="btn sm ghost foldBtn" data-foldbtn="walkin">${icon('list', 13)} <span class="fShow">نمایش دکمه‌های آزمایش</span><span class="fHide">پنهان کردن دکمه‌ها</span></button><div class="pickBody">
         <div class="deptTabs" id="wDeps" style="position:static;margin-top:10px"><button data-dep="all" class="on">همه</button>${deps.map(d => `<button data-dep="${d.id}" title="${esc(d.name_fa || '')}">${esc(d.name || d.code)}</button>`).join('')}</div>
-        <div class="testChips" id="wChips"></div>
+        <div class="testChips" id="wChips"></div></div></div>
         <div class="selList" id="wl" style="margin-top:10px"></div><div id="wWarn"></div><div class="totals"><div><span>جمع</span><b id="wsum">0</b></div><div><span>سهم مریض</span><b id="wnet">0</b></div></div>
         <button class="btn primary lg" data-act="create" style="margin-top:12px">${icon('next')} ثبت و رفتن به پذیرش و فیس</button></div></div>`;
     let calcFn = null;

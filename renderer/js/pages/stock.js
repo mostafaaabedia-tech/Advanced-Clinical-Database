@@ -390,23 +390,138 @@ Pages.expenses = {
   }
 };
 
-// ================================================================ withdrawals
-Pages.withdrawals = {
+// ================================================================ withdrawals (all sections for the stock / accounts station; own sections for pharmacy and reception)
+function withdrawalsPage(title, sub) {
+  return {
+    async render(view) {
+      const [mf, mt] = currentMonthRange();
+      const secs = wdSectionsFor();
+      view.innerHTML = `<div class="pageHead"><div><h1>${title}</h1><p>${sub}</p></div><div class="toolbar"><button class="btn primary" data-act="new">${icon('plus')} برداشت جدید</button><button class="btn" data-act="print">${icon('print')} چاپ</button><button class="btn" data-act="csv">${icon('download')} CSV</button></div></div>
+        <div class="filterBar"><label class="field"><span>از</span>${dateInput('from', mf, 'id="w_from"')}</label><label class="field"><span>تا</span>${dateInput('to', mt, 'id="w_to"')}</label>
+          ${secs.length > 1 ? `<label class="field"><span>بخش</span><select id="w_sec">${opt(secs.map(x => [x, SECTIONS[x]]), '', { empty: 'همه' })}</select></label>` : ''}
+          <label class="field"><span>نوع</span><select id="w_kind"><option value="">همه</option></select></label><label class="field"><span>جستجو</span><input id="w_q" placeholder="شخص، فاکتور، یادداشت…"></label></div>
+        <div class="grid g4" id="wK" style="margin-bottom:14px"></div>
+        <div class="card"><div class="tableWrap"><table class="t" id="wT"><thead><tr><th>تاریخ</th><th>بخش</th><th>نوع برداشت</th><th>برای (شخص / فاکتور)</th><th>مبلغ</th><th>برداشت توسط</th><th>یادداشت</th><th></th></tr></thead><tbody id="wB"></tbody><tfoot id="wF"></tfoot></table></div></div>`;
+      const kinds = [...new Map(secs.flatMap(s => WD_KINDS[s]).map(k => [k[0], k])).values()];
+      $('#w_kind', view).innerHTML = '<option value="">همه</option>' + opt(kinds, '');
+      let rows = [];
+      const load = async () => {
+        const q = { from: dateOf($('#w_from', view)), to: dateOf($('#w_to', view)), limit: 10000 };
+        const sec = $('#w_sec', view)?.value || (secs.length === 1 ? secs[0] : '');
+        rows = (await API.list('withdrawals', q)).filter(w => secs.includes(w.section) && (!sec || w.section === sec) && (!$('#w_kind', view).value || w.kind === $('#w_kind', view).value));
+        const qq = $('#w_q', view).value.trim().toLowerCase();
+        if (qq) rows = rows.filter(w => [w.person, w.factor_no, w.note, w.by_whom].some(v => String(v || '').toLowerCase().includes(qq)));
+        $('#wB', view).innerHTML = rows.map(w => `<tr><td class="nowrap">${fmtDate(w.date)} <small class="muted">${weekday(w.date)}</small></td><td>${esc(SECTIONS[w.section] || w.section)}</td><td>${w.kind === 'personal' ? pill(wdKindName(w.section, w.kind), 'warn') : w.kind === 'factor' ? pill(wdKindName(w.section, w.kind), 'info') : esc(wdKindName(w.section, w.kind))}</td>
+          <td>${esc(w.person || '')}${w.factor_no ? ` <span class="codeTag small">${esc(w.factor_no)}</span>` : ''}</td><td class="money">${money(w.amount)}</td><td>${esc(w.by_whom || '')}</td><td class="small">${esc(w.note || '')}</td>
+          <td class="nowrap"><button class="btn sm" data-act="edit" data-id="${w.id}">${icon('edit', 14)}</button> <button class="btn sm dangerText" data-act="del" data-id="${w.id}">${icon('trash', 14)}</button></td></tr>`).join('') || emptyRow(8);
+        $('#wF', view).innerHTML = `<tr><td colspan="4">مجموع (${rows.length})</td><td>${money(sumBy(rows, 'amount'))}</td><td colspan="3"></td></tr>`;
+        // totals of every section and type
+        const groups = [];
+        for (const s of secs) for (const [k, l] of WD_KINDS[s]) { const t = sumBy(rows.filter(r => r.section === s && (r.kind === k || (k === 'business' && !WD_KINDS[s].some(x => x[0] === r.kind)))), 'amount'); if (t) groups.push([`${SECTIONS[s]} — ${l}`, t, s]); }
+        $('#wK', view).innerHTML = groups.map(([l, t, s]) => kpi(l, money(t), { ic: s === 'pharmacy' ? 'pill' : s === 'lab' ? 'flask' : 'ticket', cls: /شخصی/.test(l) ? 'warn' : /فاکتور/.test(l) ? 'info' : '' })).join('') || `<div class="muted">در این بازه برداشتی نیست</div>`;
+      };
+      $$('#w_from, #w_to, #w_sec, #w_kind', view).forEach(el => el && el.addEventListener('change', load));
+      $('#w_q', view).addEventListener('input', debounce(load, 250));
+      actions(view, {
+        new: () => withdrawalDialog(secs[0], load),
+        edit: (b) => withdrawalDialog(null, load, rows.find(r => r.id === Number(b.dataset.id))),
+        del: async (b) => { if (await confirmDlg('این برداشت حذف شود؟ (اگر پرداخت فاکتور باشد، از فاکتور هم حذف می‌شود)', { danger: true })) { await API.del('withdrawals', b.dataset.id); load(); } },
+        print: () => previewDoc(reportDocHTML(title, `<table class="rt">${$('#wT', view).innerHTML.replace(/<button[\s\S]*?<\/button>/g, '')}</table>`, `${fmtDate(dateOf($('#w_from', view)))} — ${fmtDate(dateOf($('#w_to', view)))}`), { title }),
+        csv: () => exportCSV('withdrawals', rows, [[r => fmtDateNum(r.date), 'تاریخ'], [r => SECTIONS[r.section], 'بخش'], [r => wdKindName(r.section, r.kind), 'نوع'], ['person', 'برای'], ['factor_no', 'فاکتور'], ['amount', 'مبلغ'], ['by_whom', 'توسط'], ['note', 'یادداشت']])
+      });
+      await load();
+    }
+  };
+}
+Pages.withdrawals = withdrawalsPage('برداشت‌ها', 'پول برداشته شده از صندوق دواخانه، لابراتوار و پذیرش — به تفکیک نوع: شخصی، پرداخت فاکتور، معاینات بیرونی، برای شخص و سایر.');
+Pages['ph-wd'] = withdrawalsPage('برداشت‌های دواخانه', 'جدا از حسابات فروش: برداشت شخصی، پرداخت فاکتور کمپنی، برای شخص (معاش، قرض) و سایر.');
+Pages['rc-wd'] = withdrawalsPage('برداشت‌های لابراتوار و پذیرش', 'برداشت از پول لابراتوار: شخصی یا معاینات بیرونی (آزمایش ارسالی) — و برداشت از صندوق پذیرش.');
+
+// ================================================================ monthly account like the Excel book «حسابات ماهوار»:
+// total sales − purchase factors of the month − withdrawals = left (pharmacy), the same for the laboratory and the reception fees
+function monthAccountPage(title, secs) {
+  return {
+    async render(view) {
+      const months = lastMonths(13).reverse();
+      view.innerHTML = `<div class="pageHead"><div><h1>${title}</h1><p>مثل فایل اکسل «حسابات ماهوار»: اول مجموع فروشات، بعد مبلغ فاکتورها کم می‌شود، بعد برداشتی‌ها — و باقی ماه.</p></div>
+        <div class="toolbar"><select id="maM" style="width:auto">${months.map((m, i) => `<option value="${i}">${esc(m.label)}</option>`).join('')}</select><button class="btn" data-act="print">${icon('print')} چاپ</button><button class="btn" data-act="csv">${icon('download')} CSV</button></div></div>
+        <div id="maOut"></div>`;
+      let days = [], m = null;
+      const S = (k) => r2(sumBy(days, k));
+      const line = (label, v, cls = '', sign = '') => `<tr class="${cls}"><td>${label}</td><td class="money">${sign}${money(v)}</td></tr>`;
+      const block = (key) => {
+        if (key === 'pharmacy') {
+          const sales = S('ph_net'), fac = S('purchases'), wd = r2(S('wd_ph_personal') + S('wd_ph_other')), left = r2(sales - fac - wd);
+          return { left, html: `<div class="card"><h2>${icon('pill')} دواخانه — ${esc(m.label)}</h2><div class="grid g-21">
+            <div class="tableWrap" style="max-height:520px"><table class="t maT"><thead><tr><th>تاریخ</th><th>فروشات دواخانه</th><th>برداشت شخصی</th><th>برای شخص / سایر</th><th>پرداخت فاکتور از صندوق</th><th>برداشت توسط</th><th>مبلغ بعد از برداشتی‌ها</th></tr></thead>
+            <tbody>${days.filter(d => d.ph_net || d.wd_ph_personal || d.wd_ph_other || d.wd_ph_factor).map(d => `<tr><td class="nowrap">${fmtDateNum(d.date)} <small class="muted">${weekday(d.date)}</small></td><td class="money">${money(d.ph_net)}</td><td class="neg">${d.wd_ph_personal ? money(d.wd_ph_personal) : ''}</td><td class="neg">${d.wd_ph_other ? money(d.wd_ph_other) : ''}</td><td>${d.wd_ph_factor ? money(d.wd_ph_factor) : ''}</td><td class="small">${esc(d.wd_by || '')}</td><td>${money(d.ph_net - d.wd_ph_personal - d.wd_ph_other - d.wd_ph_factor)}</td></tr>`).join('') || emptyRow(7)}</tbody>
+            <tfoot><tr><td>مجموع</td><td>${money(sales)}</td><td>${money(S('wd_ph_personal'))}</td><td>${money(S('wd_ph_other'))}</td><td>${money(S('wd_ph_factor'))}</td><td></td><td>${money(sales - S('wd_ph_personal') - S('wd_ph_other') - S('wd_ph_factor'))}</td></tr></tfoot></table></div>
+            <div><table class="t maSum"><tbody>${line('۱. مجموع فروشات دواخانه', sales, 'big')}${line('۲. مبلغ فاکتورهای خرید این ماه', fac, 'neg', '− ')}${line('۳. برداشتی‌ها (شخصی + برای شخص + سایر)', wd, 'neg', '− ')}${line('باقی ماه (۱ − ۲ − ۳)', left, 'total ' + (left >= 0 ? 'pos' : 'neg'))}</tbody></table>
+              <div class="mini muted" style="margin-top:8px">از فاکتورها ${money(S('wd_ph_factor'))} از صندوق دواخانه پرداخت شده (جزء مبلغ فاکتورها است و دوباره کم نمی‌شود).${S('supplier_paid') ? ` · کل پرداخت به کمپنی‌ها: ${money(S('supplier_paid'))}` : ''}</div></div></div></div>` };
+        }
+        if (key === 'lab') {
+          const inc = S('lab_total'), fac = S('lab_purchases'), wd = r2(S('wd_lab_personal') + S('wd_lab_external') + S('wd_lab_other')), left = r2(inc - fac - wd);
+          return { left, html: `<div class="card"><h2>${icon('flask')} لابراتوار — ${esc(m.label)}</h2><div class="grid g-21">
+            <div class="tableWrap" style="max-height:520px"><table class="t maT"><thead><tr><th>تاریخ</th><th>عاید لابراتوار</th><th>برداشت شخصی</th><th>معاینات بیرونی</th><th>سایر</th><th>برداشت توسط</th><th>مبلغ بعد از برداشتی‌ها</th></tr></thead>
+            <tbody>${days.filter(d => d.lab_total || d.wd_lab_personal || d.wd_lab_external || d.wd_lab_other).map(d => `<tr><td class="nowrap">${fmtDateNum(d.date)} <small class="muted">${weekday(d.date)}</small></td><td class="money">${money(d.lab_total)}</td><td class="neg">${d.wd_lab_personal ? money(d.wd_lab_personal) : ''}</td><td class="neg">${d.wd_lab_external ? money(d.wd_lab_external) : ''}</td><td class="neg">${d.wd_lab_other ? money(d.wd_lab_other) : ''}</td><td class="small">${esc(d.wd_by || '')}</td><td>${money(d.lab_total - d.wd_lab_personal - d.wd_lab_external - d.wd_lab_other)}</td></tr>`).join('') || emptyRow(7)}</tbody>
+            <tfoot><tr><td>مجموع</td><td>${money(inc)}</td><td>${money(S('wd_lab_personal'))}</td><td>${money(S('wd_lab_external'))}</td><td>${money(S('wd_lab_other'))}</td><td></td><td>${money(inc - wd)}</td></tr></tfoot></table></div>
+            <div><table class="t maSum"><tbody>${line('۱. مجموع عاید لابراتوار', inc, 'big')}${line('۲. فاکتور مواد لابراتوار (خرید این ماه)', fac, 'neg', '− ')}${line('۳. برداشتی‌ها (شخصی + معاینات بیرونی + سایر)', wd, 'neg', '− ')}${line('باقی ماه (۱ − ۲ − ۳)', left, 'total ' + (left >= 0 ? 'pos' : 'neg'))}</tbody></table></div></div></div>` };
+        }
+        const inc = S('reception'), wd = r2(S('wd_rc_personal') + S('wd_rc_other')), left = r2(inc - wd);
+        return { left, html: `<div class="card"><h2>${icon('ticket')} فیس پذیرش و ویزیت — ${esc(m.label)}</h2><table class="t maSum" style="max-width:520px"><tbody>${line('مجموع فیس‌های دریافت شده', inc, 'big')}${line('برداشتی‌های پذیرش', wd, 'neg', '− ')}${line('باقی ماه', left, 'total ' + (left >= 0 ? 'pos' : 'neg'))}</tbody></table></div>` };
+      };
+      const draw = async () => {
+        m = months[Number($('#maM', view).value) || 0];
+        days = await API.get('/api/reports/days', { from: m.range[0], to: m.range[1] });
+        const bs = secs.map(block);
+        const total = r2(bs.reduce((a, b) => a + b.left, 0));
+        $('#maOut', view).innerHTML = (secs.length > 1 ? `<div class="grid g4" style="margin-bottom:14px">${secs.map((k, i) => kpi('باقی ' + SECTIONS[k], money(bs[i].left), { ic: k === 'pharmacy' ? 'pill' : k === 'lab' ? 'flask' : 'ticket', cls: bs[i].left >= 0 ? 'good' : 'bad' })).join('')}${kpi('باقی کل ماه', money(total), { ic: 'money', cls: 'violet', sub: currency() })}</div>` : '') + bs.map(b => b.html).join('');
+      };
+      $('#maM', view).onchange = draw;
+      actions(view, {
+        print: () => previewDoc(reportDocHTML(title + ' — ' + m.label, $$('#maOut table', view).map(t => `<table class="rt">${t.innerHTML}</table>`).join('<br>')), { title }),
+        csv: () => exportCSV('monthly-account', days, [[r => fmtDateNum(r.date), 'تاریخ'], ['ph_net', 'فروشات دواخانه'], ['wd_ph_personal', 'برداشت شخصی دواخانه'], ['wd_ph_other', 'برداشت سایر دواخانه'], ['wd_ph_factor', 'پرداخت فاکتور'], ['purchases', 'فاکتور خرید'], ['lab_total', 'لابراتوار'], ['wd_lab_personal', 'برداشت شخصی لابراتوار'], ['wd_lab_external', 'معاینات بیرونی'], ['wd_lab_other', 'سایر لابراتوار'], ['lab_purchases', 'فاکتور مواد لابراتوار'], ['reception', 'فیس پذیرش'], ['wd_by', 'برداشت توسط']])
+      });
+      await draw();
+    }
+  };
+}
+Pages['month-account'] = monthAccountPage('حساب ماهوار', ['pharmacy', 'lab', 'reception']);
+Pages['ph-month'] = monthAccountPage('حساب ماهوار دواخانه', ['pharmacy']);
+Pages['rc-month'] = monthAccountPage('حساب ماهوار لابراتوار و پذیرش', ['lab', 'reception']);
+
+// ================================================================ patients and turns of every doctor, day by day
+Pages['dr-daily'] = {
   async render(view) {
-    const [mf, mt] = currentMonthRange();
-    view.innerHTML = `<div class="pageHead"><div><h1>برداشت‌ها</h1><p>پول برداشته شده از صندوق دواخانه، لابراتوار و پذیرش (عادی یا شخصی).</p></div><div class="toolbar"><button class="btn primary" data-act="new">${icon('plus')} برداشت جدید</button></div></div>
-      <div class="filterBar"><label class="field"><span>از</span>${dateInput('from', mf, 'id="w_from"')}</label><label class="field"><span>تا</span>${dateInput('to', mt, 'id="w_to"')}</label><label class="field"><span>بخش</span><select id="w_sec">${opt([['pharmacy', 'دواخانه'], ['lab', 'لابراتوار'], ['reception', 'پذیرش']], '', { empty: 'همه' })}</select></label></div>
-      <div class="card"><div class="tableWrap"><table class="t"><thead><tr><th>تاریخ</th><th>بخش</th><th>نوع</th><th>مبلغ</th><th>برداشت توسط</th><th>یادداشت</th><th></th></tr></thead><tbody id="wB"></tbody><tfoot id="wF"></tfoot></table></div></div>`;
+    const [mf] = currentMonthRange();
+    view.innerHTML = `<div class="pageHead"><div><h1>آمار روزانه داکتران و نوبت‌ها</h1><p>هر روز برای هر داکتر: تعداد نوبت‌ها، آخرین نمبر نوبت، دیده شده، منتظر، رزرو، غیرحاضر، مریض جدید و فیس.</p></div>
+      <div class="toolbar"><button class="btn" data-act="print">${icon('print')} چاپ</button><button class="btn" data-act="csv">${icon('download')} CSV</button></div></div>
+      <div class="filterBar"><label class="field"><span>از</span>${dateInput('from', mf, 'id="dd_from"')}</label><label class="field"><span>تا</span>${dateInput('to', today(), 'id="dd_to"')}</label>
+        <label class="field"><span>داکتر</span><select id="dd_doc">${opt(App.doctors.filter(d => d.active).map(d => [d.id, doctorName(d)]), '', { empty: 'همه داکتران' })}</select></label>
+        <div class="chips"><button class="chip" data-r="0">امروز</button><button class="chip" data-r="7">۷ روز</button><button class="chip" data-r="30">۳۰ روز</button></div></div>
+      <div class="grid g4" id="ddK" style="margin-bottom:14px"></div>
+      <div class="card"><h2>مجموع هر داکتر</h2><div class="tableWrap"><table class="t" id="ddS"></table></div></div>
+      <div class="card"><h2>روز به روز</h2><div class="tableWrap" style="max-height:560px"><table class="t" id="ddT"></table></div></div>`;
     let rows = [];
+    const head = (first) => `<thead><tr><th>${first}</th><th>نوبت‌ها</th><th>آخرین نمبر</th><th>دیده شده</th><th>منتظر</th><th>رزرو</th><th>غیرحاضر</th><th>لغو</th><th>مریض جدید</th><th>فیس</th><th>تخفیف داکتر</th></tr></thead>`;
+    const cells = (r) => `<td><b>${r.turns}</b></td><td>${r.last_turn || ''}</td><td class="pos">${r.done}</td><td>${r.waiting || ''}</td><td>${r.reserved || ''}</td><td class="neg">${r.no_show || ''}</td><td class="muted">${r.cancelled || ''}</td><td>${r.new_patients || ''}</td><td class="money">${money(r.fees)}</td><td>${r.dr_discount ? money(r.dr_discount) : ''}</td>`;
     const load = async () => {
-      const q = { from: dateOf($('#w_from', view)), to: dateOf($('#w_to', view)), limit: 10000 }; if ($('#w_sec', view).value) q['eq.section'] = $('#w_sec', view).value;
-      rows = await API.list('withdrawals', q);
-      $('#wB', view).innerHTML = rows.map(w => `<tr><td>${fmtDate(w.date)}</td><td>${esc(SECTIONS[w.section] || w.section)}</td><td>${w.kind === 'personal' ? pill('شخصی', 'warn') : 'عادی'}</td><td class="money">${money(w.amount)}</td><td>${esc(w.by_whom || '')}</td><td>${esc(w.note || '')}</td>
-        <td class="nowrap"><button class="btn sm" data-act="edit" data-id="${w.id}">${icon('edit', 14)}</button> <button class="btn sm dangerText" data-act="del" data-id="${w.id}">${icon('trash', 14)}</button></td></tr>`).join('') || emptyRow(7);
-      $('#wF', view).innerHTML = `<tr><td colspan="3">مجموع</td><td>${money(sumBy(rows, 'amount'))}</td><td colspan="3">شخصی: ${money(sumBy(rows.filter(r => r.kind === 'personal'), 'amount'))}</td></tr>`;
+      rows = await API.get('/api/reports/doctor-daily', { from: dateOf($('#dd_from', view)), to: dateOf($('#dd_to', view)), doctor_id: $('#dd_doc', view).value });
+      const by = new Map();
+      rows.forEach(r => { const o = by.get(r.doctor_id) || { name: doctorName(r), turns: 0, done: 0, waiting: 0, reserved: 0, no_show: 0, cancelled: 0, new_patients: 0, fees: 0, dr_discount: 0, days: 0, last_turn: 0 };
+        ['turns', 'done', 'waiting', 'reserved', 'no_show', 'cancelled', 'new_patients', 'fees', 'dr_discount'].forEach(k => o[k] = r2(o[k] + (r[k] || 0))); o.days++; o.last_turn = Math.max(o.last_turn, r.last_turn || 0); by.set(r.doctor_id, o); });
+      const sum = [...by.values()].sort((a, b) => b.turns - a.turns);
+      $('#ddS', view).innerHTML = head('داکتر') + `<tbody>${sum.map(o => `<tr><td><b>${esc(o.name)}</b> <small class="muted">${o.days} روز · میانگین ${(o.turns / Math.max(1, o.days)).toFixed(1)} در روز</small></td>${cells({ ...o, last_turn: o.last_turn })}</tr>`).join('') || emptyRow(11)}</tbody>`;
+      $('#ddT', view).innerHTML = head('تاریخ / داکتر') + `<tbody>${rows.map(r => `<tr><td class="nowrap">${fmtDate(r.date)} <small class="muted">${weekday(r.date)}</small> — <b>${esc(doctorName(r))}</b></td>${cells(r)}</tr>`).join('') || emptyRow(11)}</tbody>`;
+      const T = (k) => sumBy(rows, k);
+      $('#ddK', view).innerHTML = kpi('مجموع نوبت‌ها', T('turns'), { ic: 'ticket' }) + kpi('دیده شده', T('done'), { ic: 'check', cls: 'good' }) + kpi('مریض جدید', T('new_patients'), { ic: 'user', cls: 'info' }) + kpi('فیس', money(T('fees')), { ic: 'money', cls: 'violet', sub: currency() });
     };
-    $$('#w_from, #w_to, #w_sec', view).forEach(el => el.addEventListener('change', load));
-    actions(view, { new: () => withdrawalDialog('pharmacy', load), edit: (b) => withdrawalDialog(null, load, rows.find(r => r.id === Number(b.dataset.id))), del: async (b) => { if (await confirmDlg('حذف شود؟', { danger: true })) { await API.del('withdrawals', b.dataset.id); load(); } } });
+    $$('#dd_from, #dd_to, #dd_doc', view).forEach(el => el.addEventListener('change', load));
+    $$('[data-r]', view).forEach(c => c.onclick = () => { setDateInput($('#dd_from', view), isoDate(addDays(new Date(), -Number(c.dataset.r)))); setDateInput($('#dd_to', view), today()); load(); });
+    actions(view, {
+      print: () => previewDoc(reportDocHTML('آمار روزانه داکتران و نوبت‌ها', `<table class="rt">${$('#ddS', view).innerHTML}</table><br><table class="rt">${$('#ddT', view).innerHTML}</table>`, `${fmtDate(dateOf($('#dd_from', view)))} — ${fmtDate(dateOf($('#dd_to', view)))}`), { title: 'آمار داکتران' }),
+      csv: () => exportCSV('doctor-daily', rows, [[r => fmtDateNum(r.date), 'تاریخ'], [r => doctorName(r), 'داکتر'], ['turns', 'نوبت‌ها'], ['last_turn', 'آخرین نمبر'], ['done', 'دیده شده'], ['waiting', 'منتظر'], ['reserved', 'رزرو'], ['no_show', 'غیرحاضر'], ['cancelled', 'لغو'], ['new_patients', 'مریض جدید'], ['fees', 'فیس']])
+    });
     await load();
   }
 };

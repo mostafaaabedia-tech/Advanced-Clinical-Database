@@ -27,6 +27,17 @@ flowchart TB
 
 Every station has light / dark / automatic mode and its own colour (Admin → settings → station colours, or *this computer*).
 
+**New in v1.3**
+- **Prescription in English**: dose × frequency is printed as `1 × 4 / day`, timing (*After meal*), duration (*5 days*, *alternate days*, *every 2 days*, nights, weeks or **selected dates**); old Persian entries are translated when printed. The patient box on the prescription is smaller.
+- **Pick-lists that show every option** for form, unit, dose, frequency, timing and duration (all editable in Admin → lists); the drug search list is no longer hidden under the prescription table; a live preview of the printed line under each medicine.
+- **Previous medicines** tab in the doctor's history (add one medicine or repeat the whole prescription).
+- **Persian typing in patient names** even when the Windows keyboard is English (only in the patient name / father / address boxes; can be turned off per computer).
+- Test buttons (departments and tests) can be **hidden / shown** at the lab reception and for the doctor.
+- **Withdrawals by type**: pharmacy (personal, **purchase factor** — recorded as a payment of that factor, for a person, other), laboratory (**personal** or **external tests**), reception; separate withdrawals pages for the pharmacy and the reception.
+- **Monthly account like the Excel book**: total sales − factors of the month − withdrawals = left, for the pharmacy, the laboratory (lab materials as factors) and the reception fees.
+- **Doctors' daily turns**: turns, last turn number, seen, waiting, reserved, no-show, new patients and fees per doctor per day.
+- Optional **simple look** (bigger text and buttons, calm colours) — *This computer → Look*.
+
 ## Codes
 `P-10001` patient · `V-000001` reception receipt · `RX-00001` prescription (pharmacy only) · `LB-00001` laboratory · `PH-000001` pharmacy sale · `F-00001` purchase factor · `IP-00001` admission · medicines `1001, 1002…`.
 Numbers can be typed without the prefix (e.g. `12` opens `RX-00012`) and every receipt carries a Code-128 barcode for scanners.

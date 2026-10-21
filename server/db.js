@@ -143,6 +143,9 @@ class ClinicDatabase {
       ['referrer_id', 'INTEGER'], ['referrer', 'TEXT'], ['discount_reason', 'TEXT'], ['discount_by', 'TEXT'], ['print_count', 'INTEGER'], ['checked_by', 'INTEGER'], ['sendout', 'INTEGER']]) add('lab_requests', c, d);
     add('lab_request_items', 'org_share', 'REAL'); add('lab_request_items', 'sendout_lab', 'TEXT');
     add('lab_results', 'kit_id', 'INTEGER');
+    // v1.3: medicine taken on selected dates; withdrawals with type, person and purchase factor
+    add('prescription_items', 'dates', 'TEXT');
+    for (const [c, d] of [['person', 'TEXT'], ['purchase_id', 'INTEGER'], ['purchase_payment_id', 'INTEGER'], ['factor_no', 'TEXT']]) add('withdrawals', c, d);
     if (v < SCHEMA_VERSION) {
       if (v >= 1 && v < 2) {
         // pharmacy payments were a single number before v2 → keep them as payment rows for the cash reports

@@ -6,6 +6,23 @@ const labCatalog = require('./lab-catalog');
 
 const LIST = (...a) => a.join('\n');
 
+// prescription pick-lists in English (printed as: 1 × 4 / day · After meal · 5 days)
+const RX_EN_LISTS = {
+  rx_units: ['mg', 'g', 'mcg', 'ml', 'IU', '%', 'mg/5ml', 'mg/ml', 'mcg/ml', 'IU/ml', 'mg/g', 'units', 'mmol'],
+  rx_frequencies: ['1 / day', '2 / day', '3 / day', '4 / day', 'every 4 h', 'every 6 h', 'every 8 h', 'every 12 h', 'every morning', 'every night', 'alternate days', 'every 3rd day', 'once a week', 'twice a week', 'when needed (PRN)', 'once (STAT)'],
+  rx_timings: ['After meal', 'Before meal', 'With meal', 'Empty stomach', 'At bedtime', 'In the morning', '30 min before meal'],
+  rx_routes: ['Oral', 'Sublingual', 'IM', 'IV', 'SC', 'Topical', 'Vaginal', 'Rectal', 'Inhalation', 'Eye', 'Ear', 'Nasal'],
+  rx_duration_units: ['days', 'nights', 'weeks', 'months', 'alternate days', 'every 2 days', 'selected dates'],
+  rx_doses: ['1', '½', '1½', '2', '3', '¼', '2.5 ml', '5 ml', '7.5 ml', '10 ml', '15 ml', '1 drop', '2 drops', '3 drops', '1 puff', '2 puffs', '1 sachet', '1 ampoule', '1 vial', 'apply thin layer']
+};
+// the Persian lists of earlier versions → replaced by the English ones (custom entries a user added are kept)
+const RX_OLD_LISTS = {
+  rx_units: ['mg', 'ml', 'g', 'mcg', 'IU', '%', 'mg/5ml'],
+  rx_frequencies: ['روزانه یک بار', 'روزانه دو بار', 'روزانه سه بار', 'روزانه چهار بار', 'هر ۶ ساعت', 'هر ۸ ساعت', 'هر ۱۲ ساعت', 'صبح‌ها', 'شب‌ها', 'یک روز در میان', 'هفته یک بار', 'در صورت ضرورت', 'یک دفعه'],
+  rx_timings: ['بعد از غذا', 'قبل از غذا', 'همراه غذا', 'ناشتا', 'قبل از خواب'],
+  rx_routes: ['خوراکی', 'زیر زبانی', 'عضلی (IM)', 'وریدی (IV)', 'زیر جلدی', 'موضعی', 'مهبلی', 'مقعدی', 'استنشاقی', 'چشمی', 'گوش', 'بینی'],
+  rx_duration_units: ['روز', 'هفته', 'ماه']
+};
 const DEFAULT_SETTINGS = {
   clinic_name: 'کلینیک OPD سلامت خانواده',
   clinic_name_en: 'Family Health OPD Clinic',
@@ -34,11 +51,13 @@ const DEFAULT_SETTINGS = {
   auto_backup: '1', backup_keep: '30',
   rx_forms: LIST('Tablet', 'Capsule', 'Syrup', 'Suspension', 'Drops', 'Injection', 'Infusion', 'Sachet', 'Cream', 'Ointment', 'Gel', 'Lotion',
     'Suppository', 'Vaginal Tablet', 'Inhaler', 'Nebulizer', 'Spray', 'Eye Drops', 'Ear Drops', 'Nasal Drops', 'Powder', 'Patch', 'Mouthwash', 'Elixir', 'Lozenge', 'Solution', 'Emulsion'),
-  rx_units: LIST('mg', 'ml', 'g', 'mcg', 'IU', '%', 'mg/5ml'),
-  rx_frequencies: LIST('روزانه یک بار', 'روزانه دو بار', 'روزانه سه بار', 'روزانه چهار بار', 'هر ۶ ساعت', 'هر ۸ ساعت', 'هر ۱۲ ساعت', 'صبح‌ها', 'شب‌ها', 'یک روز در میان', 'هفته یک بار', 'در صورت ضرورت', 'یک دفعه'),
-  rx_timings: LIST('بعد از غذا', 'قبل از غذا', 'همراه غذا', 'ناشتا', 'قبل از خواب'),
-  rx_routes: LIST('خوراکی', 'زیر زبانی', 'عضلی (IM)', 'وریدی (IV)', 'زیر جلدی', 'موضعی', 'مهبلی', 'مقعدی', 'استنشاقی', 'چشمی', 'گوش', 'بینی'),
-  rx_duration_units: LIST('روز', 'هفته', 'ماه'),
+  rx_units: LIST(...RX_EN_LISTS.rx_units),
+  rx_frequencies: LIST(...RX_EN_LISTS.rx_frequencies),
+  rx_timings: LIST(...RX_EN_LISTS.rx_timings),
+  rx_routes: LIST(...RX_EN_LISTS.rx_routes),
+  rx_duration_units: LIST(...RX_EN_LISTS.rx_duration_units),
+  rx_doses: LIST(...RX_EN_LISTS.rx_doses),
+  fa_typing: '1',
   expense_categories: LIST('معاش کارمندان', 'بل برق', 'انترنت / وایفای', 'کرایه', 'قرطاسیه', 'نظافت', 'مواد سونوگرافی', 'مواد مصرفی', 'ترانسپورت', 'ترمیمات', 'شخصی', 'برگشتی', 'سایر'),
   medicine_categories: LIST('انتی بیوتیک', 'مسکن و ضد التهاب', 'ویتامین و مکمل', 'گوارشی', 'تنفسی و حساسیت', 'قلبی و فشار خون', 'دیابت', 'زنانه و ولادی', 'اطفال', 'سیروم و پیچکاری', 'پوستی', 'چشم و گوش', 'عصبی', 'سایر'),
   medicine_units: LIST('عدد', 'تابلیت', 'کپسول', 'بوتل', 'ورق', 'قطی', 'امپول', 'ویال', 'تیوب', 'ساشه', 'بسته'),
@@ -164,6 +183,15 @@ function ensureDefaults(db) {
       db.insert('lab_reception_types', { name: 'عادی (آزاد)', code: 'FREE', price_basis: 'free', patient_pct: 100, sort: 1 });
       db.insert('lab_reception_types', { name: 'بیمه (۷۰٪ سهم مؤسسه)', code: 'INS', price_basis: 'insurance', patient_pct: 30, org_name: 'بیمه', required_fields: JSON.stringify(['tazkira', 'phone']), sort: 2, active: 0 });
       db.insert('lab_reception_types', { name: 'کارمند کلینیک', code: 'STAFF', price_basis: 'free', patient_pct: 100, discount_pct: 50, sort: 3 });
+    }
+    // prescription lists in English (v1.3)
+    if (db.getSetting('rx_lists_en', '0') !== '1') {
+      for (const [k, list] of Object.entries(RX_EN_LISTS)) {
+        const cur = String(db.getSetting(k, '') || '').split('\n').map(x => x.trim()).filter(Boolean);
+        const custom = cur.filter(x => !(RX_OLD_LISTS[k] || []).includes(x) && !list.includes(x));
+        db.db.run('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)', [k, [...list, ...custom].join('\n')]);
+      }
+      db.db.run("INSERT OR REPLACE INTO settings(key,value) VALUES('rx_lists_en','1')");
     }
     // differential counts print in the side column of the CBC (like the lab's previous report)
     if (db.getSetting('lab_side_seeded', '0') !== '1') {

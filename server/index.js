@@ -120,7 +120,9 @@ async function createServer(opts = {}) {
   };
   const filterDays = (rows, role) => {
     if (role === 'admin' || role === 'stock') return rows;
-    const keep = { pharmacy: ['ph_sales', 'ph_returns', 'ph_net', 'ph_count', 'legacy_ph', 'wd_pharmacy'], reception: ['visits', 'reception', 'wd_reception'], lab: ['lab_income', 'lab_billed', 'lab_count', 'lab_total', 'legacy_lab', 'wd_lab'], doctor: ['visits'] }[role] || [];
+    const keep = { pharmacy: ['ph_sales', 'ph_returns', 'ph_net', 'ph_count', 'legacy_ph', 'wd_pharmacy', 'wd_ph_personal', 'wd_ph_factor', 'wd_ph_other', 'purchases', 'supplier_paid', 'wd_by'],
+      reception: ['visits', 'reception', 'wd_reception', 'wd_rc_personal', 'wd_rc_other', 'lab_income', 'lab_billed', 'lab_count', 'lab_total', 'legacy_lab', 'wd_lab', 'wd_lab_personal', 'wd_lab_external', 'wd_lab_other', 'lab_purchases', 'wd_by'],
+      lab: ['lab_income', 'lab_billed', 'lab_count', 'lab_total', 'legacy_lab', 'wd_lab', 'wd_lab_personal', 'wd_lab_external', 'wd_lab_other', 'lab_purchases'], doctor: ['visits'] }[role] || [];
     return rows.map(r => { const o = { date: r.date }; keep.forEach(k => o[k] = r[k]); return o; });
   };
 
@@ -256,6 +258,8 @@ async function createServer(opts = {}) {
 
   // reports
   route('GET', '/api/reports/days', ({ user, query }) => { need(user, 'stock', 'pharmacy', 'reception', 'lab', 'doctor'); return filterDays(ops.reportDays(query.from, query.to), user.role); });
+  route('GET', '/api/reports/doctor-daily', ({ user, query }) => { need(user, 'stock', 'reception', 'doctor'); return ops.doctorDaily(query.from, query.to, user.role === 'doctor' ? (user.doctor_id || -1) : query.doctor_id); });
+  route('GET', '/api/open-purchases', ({ user }) => { need(user, 'stock', 'pharmacy'); return db.all("SELECT id, ref_no, factor_no, supplier_name, date, net, paid, (net - paid) balance FROM v_purchases WHERE net - paid > 0.001 ORDER BY date DESC LIMIT 300"); });
   route('GET', '/api/reports/dashboard', ({ user }) => { need(user, 'stock'); return ops.dashboard(); });
   route('GET', '/api/reports/medicine-sales', ({ user, query }) => { need(user, 'stock', 'pharmacy'); return ops.medicineSales(query.from, query.to); });
   route('GET', '/api/reports/suppliers', ({ user }) => { need(user, 'stock'); return ops.supplierLedger(); });

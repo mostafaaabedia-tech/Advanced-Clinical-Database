@@ -173,7 +173,7 @@ function makeOps(db, bus) {
   const ENC_FIELDS = ['bp_sys', 'bp_dia', 'pulse', 'resp_rate', 'temp', 'weight', 'height', 'spo2', 'blood_sugar', 'head_circ',
     'complaint', 'history', 'exam', 'diagnosis', 'diagnosis_code', 'impression', 'notes', 'private_notes', 'print_note', 'next_visit'];
   const NUMERIC_ENC = new Set(['bp_sys', 'bp_dia', 'pulse', 'resp_rate', 'temp', 'weight', 'height', 'spo2', 'blood_sugar', 'head_circ']);
-  const RX_ITEM_FIELDS = ['medicine_id', 'name', 'form', 'strength', 'unit', 'dose', 'frequency', 'timing', 'route', 'duration', 'duration_unit', 'qty', 'note'];
+  const RX_ITEM_FIELDS = ['medicine_id', 'name', 'form', 'strength', 'unit', 'dose', 'frequency', 'timing', 'route', 'duration', 'duration_unit', 'dates', 'qty', 'note'];
   const rxSig = (items) => JSON.stringify((items || []).map(i => RX_ITEM_FIELDS.map(f => i[f] == null || i[f] === '' ? null : String(i[f]))));
 
   function saveEncounter(p, user) {
@@ -1267,7 +1267,8 @@ function makeOps(db, bus) {
     if (!isoOk(from) || !isoOk(to)) fail('بازه تاریخ نامعتبر');
     const P = [from, to];
     const map = new Map();
-    const row = (d) => { if (!map.has(d)) map.set(d, { date: d, ph_cash: 0, ipd: 0, visits: 0, reception: 0, ph_sales: 0, ph_returns: 0, ph_cost: 0, ph_count: 0, lab_income: 0, lab_billed: 0, lab_count: 0, expenses: 0, wd_pharmacy: 0, wd_lab: 0, wd_reception: 0, wd_personal: 0, purchases: 0, supplier_paid: 0, legacy_ph: 0, legacy_lab: 0 }); return map.get(d); };
+    const row = (d) => { if (!map.has(d)) map.set(d, { date: d, ph_cash: 0, ipd: 0, visits: 0, reception: 0, ph_sales: 0, ph_returns: 0, ph_cost: 0, ph_count: 0, lab_income: 0, lab_billed: 0, lab_count: 0, expenses: 0, wd_pharmacy: 0, wd_lab: 0, wd_reception: 0, wd_personal: 0, purchases: 0, supplier_paid: 0, legacy_ph: 0, legacy_lab: 0,
+      wd_ph_personal: 0, wd_ph_factor: 0, wd_ph_other: 0, wd_lab_personal: 0, wd_lab_external: 0, wd_lab_other: 0, wd_rc_personal: 0, wd_rc_other: 0, lab_purchases: 0, wd_by: '' }); return map.get(d); };
     const add = (sql, f) => db.all(sql, P).forEach(r => f(row(r.d), r));
     add("SELECT visit_date d, COUNT(*) c FROM visits WHERE visit_date BETWEEN ? AND ? AND status NOT IN ('cancelled','reserved') GROUP BY d", (o, r) => o.visits = r.c);
     add('SELECT DATE(created_at) d, SUM(amount) s FROM visit_payments WHERE DATE(created_at) BETWEEN ? AND ? GROUP BY d', (o, r) => o.reception = r.s);
@@ -1278,6 +1279,14 @@ function makeOps(db, bus) {
     add('SELECT date d, SUM(amount) s FROM expenses WHERE date BETWEEN ? AND ? GROUP BY d', (o, r) => o.expenses = r.s);
     add("SELECT date d, SUM(CASE WHEN kind='personal' THEN amount ELSE 0 END) p, SUM(CASE WHEN kind<>'personal' AND section='pharmacy' THEN amount ELSE 0 END) ph, SUM(CASE WHEN kind<>'personal' AND section='lab' THEN amount ELSE 0 END) lb, SUM(CASE WHEN kind<>'personal' AND section='reception' THEN amount ELSE 0 END) rc FROM withdrawals WHERE date BETWEEN ? AND ? GROUP BY d",
       (o, r) => { o.wd_personal = r.p; o.wd_pharmacy = r.ph; o.wd_lab = r.lb; o.wd_reception = r.rc; });
+    // withdrawals of every section by type (personal / purchase factor / external lab tests / other)
+    add(`SELECT date d, SUM(CASE WHEN section='pharmacy' AND kind='personal' THEN amount ELSE 0 END) php, SUM(CASE WHEN section='pharmacy' AND kind='factor' THEN amount ELSE 0 END) phf,
+      SUM(CASE WHEN section='pharmacy' AND kind NOT IN ('personal','factor') THEN amount ELSE 0 END) pho, SUM(CASE WHEN section='lab' AND kind='personal' THEN amount ELSE 0 END) lp,
+      SUM(CASE WHEN section='lab' AND kind='external' THEN amount ELSE 0 END) le, SUM(CASE WHEN section='lab' AND kind NOT IN ('personal','external') THEN amount ELSE 0 END) lo,
+      SUM(CASE WHEN section='reception' AND kind='personal' THEN amount ELSE 0 END) rp, SUM(CASE WHEN section='reception' AND kind<>'personal' THEN amount ELSE 0 END) ro,
+      GROUP_CONCAT(DISTINCT by_whom) bw FROM withdrawals WHERE date BETWEEN ? AND ? GROUP BY d`,
+      (o, r) => { o.wd_ph_personal = r.php; o.wd_ph_factor = r.phf; o.wd_ph_other = r.pho; o.wd_lab_personal = r.lp; o.wd_lab_external = r.le; o.wd_lab_other = r.lo; o.wd_rc_personal = r.rp; o.wd_rc_other = r.ro; o.wd_by = r.bw || ''; });
+    add("SELECT date d, SUM(qty * IFNULL(unit_cost,0)) s FROM lab_item_moves WHERE kind='in' AND date BETWEEN ? AND ? GROUP BY d", (o, r) => o.lab_purchases = r.s);
     add('SELECT date d, SUM(net) s FROM purchases WHERE date BETWEEN ? AND ? GROUP BY d', (o, r) => o.purchases = r.s);
     add("SELECT DATE(created_at) d, SUM(amount) s FROM sale_payments WHERE DATE(created_at) BETWEEN ? AND ? AND IFNULL(method,'')<>'deposit' GROUP BY d", (o, r) => o.ph_cash = r.s);
     add("SELECT DATE(created_at) d, SUM(amount) s FROM admission_payments WHERE DATE(created_at) BETWEEN ? AND ? AND IFNULL(method,'')<>'deposit' GROUP BY d", (o, r) => o.ipd = r.s);
@@ -1285,7 +1294,7 @@ function makeOps(db, bus) {
     add('SELECT date d, pharmacy_sales s, lab_income l FROM legacy_daily WHERE date BETWEEN ? AND ?', (o, r) => { o.legacy_ph = r.s; o.legacy_lab = r.l; });
     const out = [...map.values()].sort((a, b) => a.date < b.date ? -1 : 1);
     for (const o of out) {
-      for (const k of Object.keys(o)) if (k !== 'date') o[k] = r2(o[k]);
+      for (const k of Object.keys(o)) if (k !== 'date' && k !== 'wd_by') o[k] = r2(o[k]);
       o.ph_net = r2(o.ph_sales - o.ph_returns + o.legacy_ph);           // pharmacy sales after returns (+ imported history)
       o.ph_profit = r2(o.ph_sales - o.ph_returns - o.ph_cost);
       o.lab_total = r2(o.lab_income + o.legacy_lab);
@@ -1314,6 +1323,65 @@ function makeOps(db, bus) {
       (SELECT COUNT(*) FROM lab_requests l WHERE l.doctor_id=d.id AND l.date BETWEEN ? AND ?) labs,
       (SELECT IFNULL(SUM(s.net - s.returned),0) FROM sales s WHERE s.doctor_id=d.id AND s.date BETWEEN ? AND ? AND s.status<>'void') rx_sales
       FROM doctors d WHERE d.active=1 ORDER BY d.sort`, [from, to, from, to, from, to, from, to, from, to]);
+  }
+  // patients / turns of every doctor per day
+  function doctorDaily(from, to, doctorId) {
+    if (!isoOk(from) || !isoOk(to)) fail('بازه تاریخ نامعتبر');
+    const w = ['v.visit_date BETWEEN ? AND ?', 'v.doctor_id IS NOT NULL'], P = [from, to];
+    if (doctorId) { w.push('v.doctor_id=?'); P.push(Number(doctorId)); }
+    return db.all(`SELECT v.visit_date date, v.doctor_id, d.name, d.title,
+      SUM(v.status NOT IN ('cancelled')) turns, MAX(CASE WHEN v.status<>'cancelled' THEN v.turn_no END) last_turn,
+      SUM(v.status='done') done, SUM(v.status IN ('waiting','in_visit')) waiting, SUM(v.status='reserved') reserved, SUM(v.status='no_show') no_show, SUM(v.status='cancelled') cancelled,
+      SUM(CASE WHEN v.status NOT IN ('cancelled','reserved') AND NOT EXISTS (SELECT 1 FROM visits x WHERE x.patient_id=v.patient_id AND x.id<v.id AND x.status<>'cancelled') THEN 1 ELSE 0 END) new_patients,
+      IFNULL(SUM(CASE WHEN v.status NOT IN ('cancelled','reserved') THEN v.net END),0) fees, IFNULL(SUM(CASE WHEN v.status NOT IN ('cancelled','reserved') THEN v.paid END),0) paid,
+      IFNULL(SUM(v.doctor_discount),0) dr_discount
+      FROM visits v JOIN doctors d ON d.id=v.doctor_id WHERE ${w.join(' AND ')} GROUP BY v.visit_date, v.doctor_id ORDER BY v.visit_date DESC, d.sort, d.name`, P);
+  }
+  // withdrawal (برداشت) with its type; a pharmacy withdrawal for a purchase factor is also recorded as a payment of that factor
+  function saveWithdrawal(d, user) {
+    return db.transaction(() => {
+      const SEC = { pharmacy: 'دواخانه', lab: 'لابراتوار', reception: 'پذیرش' };
+      const section = SEC[d.section] ? d.section : 'pharmacy';
+      if (user.role === 'pharmacy' && section !== 'pharmacy') fail('دواخانه فقط برداشت دواخانه را ثبت می‌کند');
+      if (user.role === 'reception' && section === 'pharmacy') fail('پذیرش برداشت دواخانه را ثبت نمی‌کند');
+      const old = d.id ? db.get('SELECT * FROM withdrawals WHERE id=?', [d.id]) : null;
+      if (d.id && !old) fail('برداشت پیدا نشد');
+      const amount = r2(d.amount); if (!(amount > 0)) fail('مبلغ را وارد کنید');
+      const kind = str(d.kind) || 'business';
+      const date = isoOk(d.date) ? d.date : today();
+      const pid = kind === 'factor' ? (Number(d.purchase_id) || null) : null;
+      if (kind === 'factor' && !pid) fail('فاکتور را انتخاب کنید');
+      const pur = pid ? db.get('SELECT * FROM v_purchases WHERE id=?', [pid]) : null;
+      if (pid && !pur) fail('فاکتور پیدا نشد');
+      if (pur) { const already = old && old.purchase_id === pid ? (old.amount || 0) : 0; if (amount > r2(pur.net - pur.paid + already) + 0.01) fail(`مبلغ بیشتر از باقی فاکتور است (باقی: ${r2(pur.net - pur.paid + already)})`); }
+      const row = { date, section, kind, amount, by_whom: str(d.by_whom), person: str(d.person) || (pur ? str(pur.supplier_name) : null), note: str(d.note), purchase_id: pid, factor_no: pur ? (pur.factor_no || pur.ref_no) : str(d.factor_no) };
+      let ppId = old?.purchase_payment_id || null;
+      if (ppId && (!pid || old.purchase_id !== pid)) { const pp = db.get('SELECT * FROM purchase_payments WHERE id=?', [ppId]); db.run('DELETE FROM purchase_payments WHERE id=?', [ppId]); if (pp) recomputePurchase(pp.purchase_id); ppId = null; }
+      if (pid) {
+        const pay = { date, amount, method: 'cash', paid_by: row.by_whom, note: `برداشت از صندوق ${SEC[section]}${row.note ? ' — ' + row.note : ''}` };
+        if (ppId) db.update('purchase_payments', ppId, pay); else ppId = db.insert('purchase_payments', { purchase_id: pid, ...pay, created_by: user.id });
+        recomputePurchase(pid);
+        emit('purchase:update', { id: pid }, ['stock', 'admin']);
+      }
+      row.purchase_payment_id = ppId;
+      let id;
+      if (old) { db.update('withdrawals', old.id, row); id = old.id; } else id = db.insert('withdrawals', { ...row, created_by: user.id });
+      db.audit(user, old ? 'update' : 'create', 'withdrawals', id, JSON.stringify(row).slice(0, 400));
+      return id;
+    });
+  }
+  function deleteWithdrawal(id, user) {
+    return db.transaction(() => {
+      const w = db.get('SELECT * FROM withdrawals WHERE id=?', [id]); if (!w) return false;
+      if (user.role !== 'admin' && user.role !== 'stock') {
+        if ((user.role === 'pharmacy' && w.section !== 'pharmacy') || (user.role === 'reception' && w.section === 'pharmacy')) fail('دسترسی ندارید');
+        if (w.date !== today()) fail('فقط برداشت‌های امروز را می‌توانید حذف کنید');
+      }
+      if (w.purchase_payment_id) { const pp = db.get('SELECT * FROM purchase_payments WHERE id=?', [w.purchase_payment_id]); db.run('DELETE FROM purchase_payments WHERE id=?', [w.purchase_payment_id]); if (pp) recomputePurchase(pp.purchase_id); }
+      db.run('DELETE FROM withdrawals WHERE id=?', [id]);
+      db.audit(user, 'delete', 'withdrawals', id, JSON.stringify(w).slice(0, 400));
+      return true;
+    });
   }
   function stockSummary() {
     const warn = n(setting('expiry_warn_days', '90'));
@@ -1357,7 +1425,7 @@ function makeOps(db, bus) {
     patientFile, saveEncounter, getRx, createSale, saleFull, returnSale, findByCode,
     saveMedicine, savePurchase, purchaseFull, addPurchasePayment, deletePurchasePayment, deletePurchase, adjustStock,
     labFull, createLabWalkin, receiveLab, payLab, saveLabResults, saveLabTest, labRequestsFull,
-    reportDays, medicineSales, supplierLedger, doctorStats, stockSummary, dashboard, medicineStock, dayRange,
+    reportDays, medicineSales, supplierLedger, doctorStats, doctorDaily, saveWithdrawal, deleteWithdrawal, stockSummary, dashboard, medicineStock, dayRange,
     alternatives, paySale, addDeposit, depositBalance, cashierPay, cashierPending, patientAccount, cashierDay, cashClose,
     labItemMove, applyLabConsumption, admit, transferBed, addAdmissionCharge, dischargeAdmission, payAdmission, admissionFull, ipdBoard,
     reorderSuggestions, doctorLoad, saveDoctorSchedule, queueDisplay, callVisit,

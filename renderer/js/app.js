@@ -20,6 +20,8 @@ const NAV = [
   ['expenses', 'مصارف و فاکتورهای دیگر', 'receipt', ['stock'], 'stock'],
   ['withdrawals', 'برداشت‌ها', 'wallet', ['stock'], 'stock'],
   ['daily', 'حسابات روزانه', 'calendar', ['stock'], 'stock'],
+  ['month-account', 'حساب ماهوار (مثل اکسل)', 'excel', ['stock'], 'stock'],
+  ['dr-daily', 'آمار روزانه داکتران و نوبت‌ها', 'chart', ['stock'], 'stock'],
   ['monthly', 'گزارش ماهانه و مفاد', 'trend', ['stock'], 'stock'],
   ['med-sales', 'فروش و مفاد هر دوا', 'chart', ['stock', 'pharmacy'], 'stock'],
   ['reorder', 'سفارش خرید (کمبودها)', 'cart', ['stock', 'pharmacy'], 'stock'],
@@ -33,6 +35,9 @@ const NAV = [
   ['rc-lab', 'پذیرش لابراتوار', 'flask', ['reception'], 'reception'],
   ['ipd', 'بستر و تخت‌ها', 'bed', ['reception', 'doctor'], 'reception'],
   ['rc-cash', 'حسابات روز و تحویل صندوق', 'money', ['reception'], 'reception'],
+  ['rc-wd', 'برداشت‌های لابراتوار و پذیرش', 'wallet', ['reception'], 'reception'],
+  ['rc-month', 'حساب ماهوار لابراتوار', 'trend', ['reception'], 'reception'],
+  ['dr-daily', 'آمار روزانه داکتران و نوبت‌ها', 'chart', ['reception'], 'reception'],
   ['qdisplay', 'صفحه نمایش نوبت (TV)', 'tv', ['reception', 'doctor'], 'reception'],
 
   ['dr-queue', 'صف مریضان', 'list', ['doctor'], 'doctor'],
@@ -45,6 +50,8 @@ const NAV = [
   ['pos', 'فروش / تحویل نسخه', 'pill', ['pharmacy'], 'pharmacy'],
   ['sales', 'لیست فروشات دواخانه', 'receipt', ['pharmacy', 'stock'], 'pharmacy'],
   ['ph-daily', 'فروش روزانه دواخانه', 'calendar', ['pharmacy'], 'pharmacy'],
+  ['ph-wd', 'برداشت‌های دواخانه', 'wallet', ['pharmacy'], 'pharmacy'],
+  ['ph-month', 'حساب ماهوار دواخانه', 'trend', ['pharmacy'], 'pharmacy'],
 
   ['lab-inbox', 'درخواست‌های آزمایش', 'bell', ['lab'], 'lab'],
   ['lab-walkin', 'پذیرش مریض بیرونی', 'plus', ['lab'], 'lab'],
@@ -59,7 +66,7 @@ const NAV = [
 ];
 const NAV_GROUPS = { admin: 'مدیریت', stock: 'انبار و حسابات', reception: 'پذیرش', doctor: 'داکتر', pharmacy: 'دواخانه', lab: 'لابراتوار', local: '' };
 const HOME = { admin: 'admin-dash', stock: 'stock-dash', reception: 'reception', doctor: 'dr-queue', pharmacy: 'rx-inbox', lab: 'lab-inbox' };
-const canSee = (page) => { const n = NAV.find(x => x[0] === page); return !n || App.user?.role === 'admin' || n[3].includes(App.user?.role); };
+const canSee = (page) => { const ns = NAV.filter(x => x[0] === page); return !ns.length || App.user?.role === 'admin' || ns.some(n => n[3].includes(App.user?.role)); };
 const isRole = (...r) => App.user && (App.user.role === 'admin' || r.includes(App.user.role));
 
 // ---------- station ----------
@@ -112,8 +119,10 @@ async function go(page, params = {}) {
   const view = $('#view');
   const fresh = view.cloneNode(false); view.replaceWith(fresh);
   fresh.scrollTop = 0;
+  cleanFloats();
   try { await Pages[page].render(fresh, params); }
   catch (e) { errToast(e); fresh.innerHTML = `<div class="card"><h2>خطا</h2><p class="muted">${esc(e.message)}</p></div>`; }
+  applyFolds(fresh);
   refreshCounts();
 }
 const reloadPage = debounce(() => { if (App.page && Pages[App.page]) go(App.page, App.params); }, 250);
@@ -317,3 +326,10 @@ function tickClock() { const d = new Date(); $('#clock').textContent = `${WEEKDA
   if (App.firstRun) $('#loginHint').innerHTML = 'ورود اول: کاربر <b>admin</b> و رمز <b>1234</b>';
   ($('#loginUser').value ? $('#loginPass') : $('#loginUser')).focus();
 })();
+
+// show / hide the test buttons (lab reception, doctor) — remembered on this computer
+function applyFolds(root) { $$('.pickWrap[data-fold]', root).forEach(w => w.classList.toggle('folded', localGet('fold_' + w.dataset.fold, '0') === '1')); }
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-foldbtn]'); if (!b) return;
+  const w = b.closest('.pickWrap'); const f = !w.classList.contains('folded'); w.classList.toggle('folded', f); localSet('fold_' + w.dataset.fold, f ? '1' : '0');
+});

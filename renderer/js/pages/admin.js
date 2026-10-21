@@ -246,7 +246,7 @@ Pages.settings = {
       <div class="card hidden" data-p="colors"><p class="mini">رنگ اصلی هر ایستگاه (منو و دکمه‌ها). هر کمپیوتر می‌تواند در «تنظیمات این کمپیوتر» رنگ خودش را هم داشته باشد.</p><div class="formGrid">
         ${Object.entries(STATIONS).map(([k, st]) => `<label class="field"><span>${esc(st.name)}</span><span class="bar"><input type="color" name="color_${k}" data-def="${st.color}" value="${esc(s['color_' + k] || st.color)}"><button type="button" class="btn sm" data-reset="${k}">پیش‌فرض</button></span></label>`).join('')}</div></div>
       <datalist id="fontList">${PRINT_FONTS.map(f => `<option value="${esc(f)}">`).join('')}</datalist>
-      <div class="card hidden" data-p="lists"><div class="grid g3">${L('rx_forms', 'شکل دواها')}${L('rx_frequencies', 'دفعات مصرف')}${L('rx_timings', 'زمان مصرف')}${L('rx_units', 'واحد قوت')}${L('rx_routes', 'طریقه مصرف')}${L('rx_duration_units', 'واحد مدت', 3)}${L('expense_categories', 'کتگوری مصارف')}${L('medicine_categories', 'کتگوری دواها')}${L('medicine_units', 'واحد فروش دوا')}${L('doctor_work_types', 'نوع کار داکتران')}${L('lab_units', 'واحدهای لابراتوار')}${L('lab_discount_reasons', 'دلایل تخفیف لابراتوار')}</div></div>
+      <div class="card hidden" data-p="lists"><div class="grid g3">${L('rx_forms', 'شکل دواها')}${L('rx_doses', 'مقدار هر بار (Dose)')}${L('rx_frequencies', 'دفعات مصرف (English: 1 / day …)')}${L('rx_timings', 'زمان مصرف')}${L('rx_units', 'واحد قوت')}${L('rx_routes', 'طریقه مصرف')}${L('rx_duration_units', 'واحد مدت', 3)}${L('expense_categories', 'کتگوری مصارف')}${L('medicine_categories', 'کتگوری دواها')}${L('medicine_units', 'واحد فروش دوا')}${L('doctor_work_types', 'نوع کار داکتران')}${L('lab_units', 'واحدهای لابراتوار')}${L('lab_discount_reasons', 'دلایل تخفیف لابراتوار')}</div></div>
       </form>`;
     $('#stT', view).onclick = (e) => { const b = e.target.closest('[data-t]'); if (!b) return; $$('#stT button', view).forEach(x => x.classList.toggle('on', x === b)); $$('[data-p]', view).forEach(p => p.classList.toggle('hidden', p.dataset.p !== b.dataset.t)); };
     const collect = () => {
@@ -337,6 +337,9 @@ Pages.local = {
         : '<div class="infoBox">در مرورگر، پرینتر در پنجره چاپ انتخاب می‌شود.</div>'}
         <div class="bar" style="margin-top:12px"><button class="btn" data-act="test">${icon('print')} چاپ آزمایشی رسید</button></div></div>
       <div class="card"><h2>${icon('settings')} عمومی</h2><label class="check"><input type="checkbox" id="snd" ${localGet('sound', '1') === '1' ? 'checked' : ''}> صدای اطلاع (نسخه / مریض / آزمایش جدید)</label>
+        <label class="check" style="margin-top:8px"><input type="checkbox" id="faT" ${localGet('fa_typing', '1') === '1' ? 'checked' : ''}> نام و مشخصات مریض همیشه فارسی تایپ شود (حتی وقتی کیبورد انگلیسی است)</label>
+        <div class="secTitle">${icon('eye', 15)} شکل برنامه</div>
+        <div class="chips" id="uiM">${[['classic', 'کلاسیک (فعلی)'], ['simple', 'ساده (بزرگ و واضح)']].map(([k, l]) => `<button type="button" class="chip ${(localGet('ui_mode', App.settings.ui_mode || 'classic') === k) ? 'on' : ''}" data-ui="${k}">${l}</button>`).join('')}</div>
         <div class="secTitle">${icon('moon', 15)} حالت نمایش و رنگ</div>
         <div class="chips" id="thM">${[['light', 'روشن'], ['dark', 'تاریک'], ['auto', 'خودکار (مطابق ویندوز)']].map(([k, l]) => `<button type="button" class="chip ${Theme.mode() === k ? 'on' : ''}" data-th="${k}">${l}</button>`).join('')}</div>
         <div class="bar" style="margin-top:10px;flex-wrap:wrap">${['', '#0f7a3a', '#1d4ed8', '#7c3aed', '#be123c', '#c2410c', '#0e7490', '#334155'].map(c => `<button type="button" class="btn sm" data-acc="${c}" style="${c ? `background:${c};color:#fff;border-color:${c}` : ''}">${c ? '&nbsp;' : 'رنگ ایستگاه'}</button>`).join('')}<input type="color" id="accC" value="${esc(localGet('accent_' + (App.station || 'browser'), '') || STATIONS[App.station || 'admin']?.color || '#0f7a3a')}" title="رنگ دلخواه"></div>
@@ -344,7 +347,8 @@ Pages.local = {
         ${nat && nat.changeServer && App.station !== 'admin' ? `<button class="btn" style="margin-top:12px" data-act="srv">${icon('network')} تغییر آدرس سرور</button>` : ''}
         ${nat && nat.openData && App.station === 'admin' ? `<button class="btn" style="margin-top:12px" data-act="data">${icon('database')} باز کردن پوشه دیتابیس</button>` : ''}</div></div>`;
     const bind = (id, key, chk) => { const el = $('#' + id, view); if (el) el.onchange = () => { localSet(key, chk ? (el.checked ? '1' : '0') : el.value); toast('ذخیره شد', 'good'); }; };
-    bind('pr_r', 'printer_receipt'); bind('pr_p', 'printer_page'); bind('pr_l', 'printer_label'); bind('sl_r', 'silent_receipt', 1); bind('sl_p', 'silent_page', 1); bind('sl_l', 'silent_label', 1); bind('snd', 'sound', 1);
+    bind('pr_r', 'printer_receipt'); bind('pr_p', 'printer_page'); bind('pr_l', 'printer_label'); bind('sl_r', 'silent_receipt', 1); bind('sl_p', 'silent_page', 1); bind('sl_l', 'silent_label', 1); bind('snd', 'sound', 1); bind('faT', 'fa_typing', 1);
+    $('#uiM', view).onclick = (e) => { const b = e.target.closest('[data-ui]'); if (!b) return; localSet('ui_mode', b.dataset.ui); $$('#uiM .chip', view).forEach(x => x.classList.toggle('on', x === b)); Theme.apply(); };
     $('#thM', view).onclick = (e) => { const b = e.target.closest('[data-th]'); if (!b) return; localSet('theme', b.dataset.th); $$('#thM .chip', view).forEach(x => x.classList.toggle('on', x === b)); Theme.apply(); };
     const setAcc = (c) => { localSet('accent_' + (App.station || 'browser'), c); Theme.apply(); toast('رنگ ذخیره شد', 'good'); };
     view.addEventListener('click', (e) => { const b = e.target.closest('[data-acc]'); if (b) setAcc(b.dataset.acc); });

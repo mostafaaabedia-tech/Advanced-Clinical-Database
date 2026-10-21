@@ -244,8 +244,9 @@ Pages['rc-lab'] = {
         <div class="card"><div class="cardHead"><h2>${icon('list')} ثبت‌های لابراتوار امروز</h2><span class="muted small">${fmtDate(today())}</span></div><div id="rlToday"></div></div></div>
         <div class="card"><h2>${icon('flask')} آزمایش‌ها <small class="muted">— فقط مخفف آزمایش؛ موس را نگه دارید تا نام کامل دیده شود</small></h2>
           <div class="searchBox"><input id="rlQ" placeholder="مخفف، نام یا نمبر آزمایش… (Enter = افزودن)" autocomplete="off"></div>
+          <div class="pickWrap" data-fold="rclab"><button type="button" class="btn sm ghost foldBtn" data-foldbtn="rclab">${icon('list', 13)} <span class="fShow">نمایش دکمه‌های آزمایش</span><span class="fHide">پنهان کردن دکمه‌ها</span></button><div class="pickBody">
           <div class="deptTabs" id="rlDeps" style="position:static;margin-top:10px"><button data-dep="all" class="on">همه</button>${deps.map(d => `<button data-dep="${d.id}" title="${esc(d.name_fa || '')}">${esc(d.name || d.code)}</button>`).join('')}</div>
-          <div class="testChips" id="rlChips"></div>
+          <div class="testChips" id="rlChips"></div></div></div>
           <div class="selList" id="rlSel" style="margin-top:12px"></div>
           <div id="rlWarn"></div>
           <div class="totals"><div><span>جمع کل</span><b id="rlSub">0</b></div><div id="rlOrgRow" class="hidden"><span>سهم مؤسسه / بیمه</span><b id="rlOrg">0</b></div>
@@ -501,7 +502,7 @@ Pages['rc-cash'] = {
       const secRows = [['visit', t.visit], ['lab', t.lab], ['sale', t.sale], ['admission', t.admission], ['deposit', t.deposit]];
       $('#cSec', view).innerHTML = `<table class="t"><thead><tr><th>بخش</th><th>تعداد پرداخت</th><th>مبلغ</th></tr></thead><tbody>${secRows.map(([k, v]) => `<tr><td>${kindTag(k)}</td><td>${day.payments.filter(x => x.kind === k).length}</td><td><b>${money(v)}</b></td></tr>`).join('')}
         <tr><td>دریافت در پذیرش</td><td></td><td>${money(t.at_reception)}</td></tr>${t.at_sections ? `<tr><td>دریافت در خود بخش‌ها</td><td></td><td>${money(t.at_sections)}</td></tr>` : ''}
-        ${day.withdrawals.map(w => `<tr class="neg"><td>برداشت: ${esc(w.by_whom || '')} ${esc(w.note || '')}</td><td>${esc(SECTIONS[w.section] || w.section || '')}</td><td>-${money(w.amount)}</td></tr>`).join('')}${t.expenses ? `<tr class="neg"><td>مصارف (انبار و حسابات)</td><td></td><td>-${money(t.expenses)}</td></tr>` : ''}
+        ${day.withdrawals.map(w => `<tr class="neg"><td>برداشت ${esc(wdKindName(w.section, w.kind))}${w.person ? ' — ' + esc(w.person) : ''}: ${esc(w.by_whom || '')} ${esc(w.note || '')}</td><td>${esc(SECTIONS[w.section] || w.section || '')}</td><td>-${money(w.amount)}</td></tr>`).join('')}${t.expenses ? `<tr class="neg"><td>مصارف (انبار و حسابات)</td><td></td><td>-${money(t.expenses)}</td></tr>` : ''}
         <tr><td><b>صندوق خالص</b></td><td></td><td><b>${money(t.net)}</b></td></tr></tbody></table>`;
       $('#cOut', view).innerHTML = `<table class="t"><tbody><tr><td>باقی فیس داکتر</td><td><b>${money(o.visits)}</b></td></tr>${o.refunds_due ? `<tr><td>قابل بازپرداخت (تخفیف داکتر)</td><td class="neg">${money(o.refunds_due)}</td></tr>` : ''}<tr><td>لابراتوار (باقی)</td><td><b>${money(o.labs)}</b> ${o.labs_to_bill ? `<small class="muted">+ ${o.labs_to_bill} درخواست بل نشده</small>` : ''}</td></tr>
         <tr><td>دواخانه (باقی)</td><td><b>${money(o.sales)}</b></td></tr><tr><td>بستر (باقی)</td><td><b>${money(o.admissions)}</b></td></tr></tbody></table><button class="btn sm" data-act="cashier" style="margin-top:8px">${icon('cash', 13)} رفتن به صندوق مرکزی</button>`;

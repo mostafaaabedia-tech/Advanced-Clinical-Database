@@ -1,7 +1,7 @@
 {
   "name": "advanced-clinical-database",
   "productName": "Clinic Admin",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Networked clinic management system (Persian): Admin/server, Stock & accounts, Reception, Doctor, Pharmacy and Laboratory stations sharing one SQLite database over the local network.",
   "main": "main.js",
   "station": "admin",

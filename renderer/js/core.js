@@ -384,18 +384,33 @@ const PAY_METHODS = { cash: 'نقد', card: 'کارت', transfer: 'حواله' }
 const SECTIONS = { clinic: 'کلینیک', pharmacy: 'دواخانه', lab: 'لابراتوار', reception: 'پذیرش', personal: 'شخصی' };
 
 // search-as-you-type dropdown for an input; fetch(q) → rows; render(row) → html; pick(row)
+// dropdown boxes are placed in <body> with fixed position so a scrolling / clipped parent (prescription rows, modals) never hides them
+function placeFloat(box, input, minW = 240) {
+  const r = input.getBoundingClientRect();
+  const w = Math.max(r.width, minW);
+  const below = window.innerHeight - r.bottom > 230 || r.top < 250;
+  box.style.position = 'fixed'; box.style.width = w + 'px'; box.style.right = 'auto';
+  box.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, r.right - w)) + 'px';
+  box.style.top = below ? (r.bottom + 3) + 'px' : 'auto';
+  box.style.bottom = below ? 'auto' : (window.innerHeight - r.top + 3) + 'px';
+}
+function floatBox(extra = '') {
+  const box = document.createElement('div'); box.className = 'dropdown floatDD hidden ' + extra;
+  document.body.appendChild(box);
+  return box;
+}
 function autocomplete(input, { fetch: fetchFn, render, pick, min = 1, delay = 160 }) {
-  const box = document.createElement('div'); box.className = 'dropdown hidden';
-  input.parentElement.style.position = 'relative'; input.parentElement.appendChild(box);
+  const box = floatBox(); box._input = input;
   let rows = [], active = -1;
+  const place = () => { if (!input.isConnected) { box.remove(); return; } placeFloat(box, input, 280); };
   const show = (r) => {
     rows = r; active = r.length ? 0 : -1;
     box.innerHTML = r.length ? r.map((x, i) => `<div class="ddItem ${i === 0 ? 'active' : ''}" data-i="${i}">${render(x)}</div>`).join('') : '<div class="empty" style="padding:12px">چیزی پیدا نشد</div>';
-    box.classList.remove('hidden');
+    place(); box.classList.remove('hidden');
   };
   const run = debounce(async () => {
     const q = input.value.trim(); if (q.length < min) { box.classList.add('hidden'); return; }
-    try { show(await fetchFn(q)); } catch (e) { errToast(e); }
+    try { const r = await fetchFn(q); if (document.activeElement === input || !box.classList.contains('hidden')) show(r); } catch (e) { errToast(e); }
   }, delay);
   input.addEventListener('input', run);
   input.addEventListener('keydown', (e) => {
@@ -407,7 +422,71 @@ function autocomplete(input, { fetch: fetchFn, render, pick, min = 1, delay = 16
   });
   box.addEventListener('mousedown', (e) => { e.preventDefault(); const it = e.target.closest('.ddItem'); if (it) { box.classList.add('hidden'); pick(rows[Number(it.dataset.i)]); } });
   input.addEventListener('blur', () => setTimeout(() => box.classList.add('hidden'), 150));
+  window.addEventListener('scroll', () => { if (!box.classList.contains('hidden')) place(); }, true);
   return { close: () => box.classList.add('hidden'), refresh: run };
+}
+// remove floating boxes of inputs that are gone (page change)
+function cleanFloats() { $$('.floatDD').forEach(b => { if (b._input && !b._input.isConnected) b.remove(); }); }
+
+// pick-list for inputs marked data-combo="key": every option is shown on click (unlike <datalist>, which hides options that
+// do not match the current value), typing filters, any free text is still allowed.
+// lists: { key: [values] | () => [values] }; onPick(input) is called after a choice.
+function comboFields(root, lists, onPick) {
+  const box = floatBox('comboDD');
+  let cur = null, opts = [], active = -1;
+  const all = (k) => { const l = lists[k]; return (typeof l === 'function' ? l() : l) || []; };
+  const draw = () => {
+    box.innerHTML = opts.length ? opts.map((o, i) => `<div class="ddItem ${i === active ? 'active' : ''}" data-i="${i}" dir="auto">${esc(o)}</div>`).join('') : '<div class="empty" style="padding:8px">—</div>';
+    placeFloat(box, cur, 170); box.classList.remove('hidden');
+    $('.ddItem.active', box)?.scrollIntoView({ block: 'nearest' });
+  };
+  const open = (el, filter) => {
+    cur = el; const list = all(el.dataset.combo); const v = el.value.trim().toLowerCase();
+    opts = filter && v && !list.some(o => o.toLowerCase() === v) ? list.filter(o => o.toLowerCase().includes(v)) : list;
+    active = Math.max(0, opts.findIndex(o => o.toLowerCase() === v)); draw();
+  };
+  const close = () => { box.classList.add('hidden'); cur = null; };
+  const choose = (i) => { if (!cur || !opts[i]) return; const el = cur; el.value = opts[i]; close(); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); onPick && onPick(el); };
+  root.addEventListener('focusin', (e) => { if (e.target.matches?.('[data-combo]') && !e.target.readOnly) open(e.target, false); });
+  root.addEventListener('mousedown', (e) => { const el = e.target.closest?.('[data-combo]'); if (el && !el.readOnly && document.activeElement === el) setTimeout(() => open(el, false), 0); });
+  root.addEventListener('input', (e) => { if (e.target === cur) open(cur, true); });
+  root.addEventListener('focusout', (e) => { if (e.target === cur) setTimeout(() => { if (document.activeElement !== cur) close(); }, 150); });
+  root.addEventListener('keydown', (e) => {
+    if (!cur || e.target !== cur || box.classList.contains('hidden')) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, Math.min(opts.length - 1, active + (e.key === 'ArrowDown' ? 1 : -1))); draw(); }
+    else if (e.key === 'Enter' && opts[active] && cur.value.trim().toLowerCase() !== opts[active].toLowerCase() && cur.value.trim() !== '') { if (opts.length) { e.preventDefault(); choose(active); } }
+    else if (e.key === 'Escape') close();
+  });
+  box.addEventListener('mousedown', (e) => { e.preventDefault(); const it = e.target.closest('.ddItem'); if (it) choose(Number(it.dataset.i)); });
+  window.addEventListener('scroll', () => { if (cur && !box.classList.contains('hidden')) { if (!cur.isConnected) close(); else placeFloat(box, cur, 170); } }, true);
+  box._input = root;
+  return { close };
+}
+
+// ---------------- Persian typing in name fields (works even when the Windows keyboard is English) ----------------
+// standard Persian keyboard layout by physical key
+const FA_KEYS = { KeyQ: 'ض', KeyW: 'ص', KeyE: 'ث', KeyR: 'ق', KeyT: 'ف', KeyY: 'غ', KeyU: 'ع', KeyI: 'ه', KeyO: 'خ', KeyP: 'ح', BracketLeft: 'ج', BracketRight: 'چ',
+  KeyA: 'ش', KeyS: 'س', KeyD: 'ی', KeyF: 'ب', KeyG: 'ل', KeyH: 'ا', KeyJ: 'ت', KeyK: 'ن', KeyL: 'م', Semicolon: 'ک', Quote: 'گ', Backslash: 'پ',
+  KeyZ: 'ظ', KeyX: 'ط', KeyC: 'ز', KeyV: 'ر', KeyB: 'ذ', KeyN: 'د', KeyM: 'پ', Comma: 'و', Period: '.', Backquote: 'پ' };
+const FA_SHIFT = { KeyC: 'ژ', KeyH: 'آ', KeyX: 'ٔ', KeyV: 'ؤ', KeyM: 'ء', KeyD: 'ي', KeyS: 'ئ', KeyA: 'َ', KeyB: 'إ', KeyN: 'أ', Comma: '،', Slash: '؟' };
+const faTypingOn = () => (App.settings?.fa_typing ?? '1') !== '0' && localGet('fa_typing', '1') !== '0';
+document.addEventListener('keydown', (e) => {
+  const el = e.target;
+  if (!el || !el.matches || e.ctrlKey || e.altKey || e.metaKey || el.readOnly || !isFaField(el) || !faTypingOn()) return;
+  if (!/^[\x21-\x7e]$/.test(e.key) || /^[0-9]$/.test(e.key)) return;     // only Latin characters are converted; Persian keyboard passes through
+  const ch = (e.shiftKey ? FA_SHIFT[e.code] : null) || FA_KEYS[e.code];
+  if (!ch) return;
+  e.preventDefault();
+  const a = el.selectionStart ?? el.value.length, b = el.selectionEnd ?? el.value.length;
+  el.setRangeText(ch, a, b, 'end');
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}, true);
+// patient name fields of the patient forms (reception, patient edit, lab / cashier patient picker)
+const FA_NAMES = '[name="full_name"], [name="father_name"], [name="grandfather_name"], [name="address"], [name="occupation"], [name="emergency_name"], [name="spouse_name"]';
+function isFaField(el) { return el.matches('[data-fa]') || (el.matches(FA_NAMES) && !!el.closest('.recForm, #epF, [data-pp="form"], [data-ptform]')); }
+// mark the name / patient-detail inputs inside a container
+function faFields(root, sel = '[name="full_name"], [name="father_name"], [name="grandfather_name"], [name="address"], [name="occupation"], [name="spouse_name"], [name="guardian"], [name="relation"]') {
+  $$(sel, root).forEach(el => { if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') { el.setAttribute('data-fa', ''); el.setAttribute('lang', 'fa'); el.dir = 'rtl'; } });
 }
 
 // patient search (code / name / phone)
@@ -429,6 +508,7 @@ const Theme = {
   apply() {
     const dark = this.dark();
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.documentElement.dataset.ui = localGet('ui_mode', App.settings?.ui_mode || 'classic') === 'simple' ? 'simple' : 'classic';
     const st = STATIONS[App.station] || STATIONS.admin;
     let accent = localGet('accent_' + (App.station || 'browser'), '') || App.settings['color_' + (App.station || 'admin')] || '';
     if (!/^#[0-9a-f]{6}$/i.test(accent)) accent = '';

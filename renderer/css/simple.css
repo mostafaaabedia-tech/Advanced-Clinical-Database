@@ -1,0 +1,75 @@
+/* "Simple" look (option, chosen per computer): bigger text and buttons, calm colours, flat cards, one clear accent.
+   Everything is scoped to html[data-ui="simple"] so the classic look stays unchanged. */
+html[data-ui="simple"] { --radius: 14px; --radius-sm: 10px; --shadow: none; --line: #dfe5ec; --line-2: #c3ccd7; --bg: #f3f5f8; --muted: #5b6676; --text-2: #364152; }
+html[data-ui="simple"] body, html[data-ui="simple"] html { font-size: 15px; }
+html[data-ui="simple"] #app { grid-template-columns: 264px 1fr; grid-template-rows: 64px 1fr; }
+
+/* top bar: white, brand line underneath */
+html[data-ui="simple"] #topbar { background: #fff; color: var(--text); box-shadow: none; border-bottom: 3px solid var(--brand); }
+html[data-ui="simple"] #topbar .brandIcon { background: var(--brand-soft); }
+html[data-ui="simple"] #topbar .brand small { color: var(--muted); opacity: 1; }
+html[data-ui="simple"] #topbar .topSearch input { background: var(--surface-2); color: var(--text); border: 1.5px solid var(--line); padding-block: 10px; }
+html[data-ui="simple"] #topbar .topSearch input::placeholder { color: var(--muted); }
+html[data-ui="simple"] #topbar .topSearch svg, html[data-ui="simple"] #topbar #gsIcon { color: var(--muted); }
+html[data-ui="simple"] #topbar .btn, html[data-ui="simple"] #topbar button { color: var(--text) !important; border-color: var(--line-2) !important; background: #fff !important; }
+html[data-ui="simple"] #topbar .clock, html[data-ui="simple"] #topbar .topRight { color: var(--text-2); }
+
+/* sidebar: big rows, the open page is a solid coloured bar */
+html[data-ui="simple"] #sidebar { padding: 14px 12px; background: #fff; }
+html[data-ui="simple"] .navGroup { font-size: 12.5px; font-weight: 700; color: var(--brand-ink); padding: 16px 12px 6px; border-top: 1px solid var(--line); margin-top: 6px; }
+html[data-ui="simple"] .navGroup:first-child { border-top: 0; margin-top: 0; }
+html[data-ui="simple"] .navItem { padding: 12px 14px; font-size: 15px; border-radius: 12px; color: var(--text); margin-bottom: 2px; }
+html[data-ui="simple"] .navItem svg { width: 21px; height: 21px; flex-basis: 21px; opacity: 1; color: var(--brand); }
+html[data-ui="simple"] .navItem.on { background: var(--brand); color: #fff; }
+html[data-ui="simple"] .navItem.on svg { color: #fff; }
+html[data-ui="simple"] .navItem .cnt { font-size: 12.5px; padding: 1px 9px; background: var(--bad); color: #fff; }
+
+/* page */
+html[data-ui="simple"] #view { padding: 24px 28px 48px; }
+html[data-ui="simple"] .pageHead h1 { font-size: 25px; color: var(--text); }
+html[data-ui="simple"] .pageHead p { font-size: 13.5px; }
+html[data-ui="simple"] .card { padding: 20px 22px; border-width: 1.5px; }
+html[data-ui="simple"] .card > h2, html[data-ui="simple"] .card > .cardHead h2 { font-size: 18px; color: var(--brand-ink); display: flex; align-items: center; gap: 8px; padding-bottom: 10px; border-bottom: 1.5px solid var(--line); margin-bottom: 16px; width: 100%; }
+html[data-ui="simple"] .cardHead { border-bottom: 1.5px solid var(--line); padding-bottom: 10px; margin-bottom: 16px; }
+html[data-ui="simple"] .cardHead h2 { border: 0 !important; padding: 0 !important; margin: 0 !important; width: auto !important; }
+
+/* form fields: large, bold labels */
+html[data-ui="simple"] .field > span { font-size: 13.5px; font-weight: 700; color: var(--text); }
+html[data-ui="simple"] input[type=text], html[data-ui="simple"] input[type=number], html[data-ui="simple"] input[type=password], html[data-ui="simple"] input[type=date],
+html[data-ui="simple"] input[type=search], html[data-ui="simple"] input[type=tel], html[data-ui="simple"] input:not([type]), html[data-ui="simple"] select, html[data-ui="simple"] textarea {
+  font-size: 15px; padding: 11px 13px; border-width: 1.5px; border-radius: 10px; min-height: 44px; }
+html[data-ui="simple"] .rxItem input, html[data-ui="simple"] .rxItem select { min-height: 38px; padding: 7px 8px; font-size: 14px; }
+html[data-ui="simple"] input:focus, html[data-ui="simple"] select:focus, html[data-ui="simple"] textarea:focus { box-shadow: 0 0 0 4px var(--brand-soft); border-color: var(--brand); }
+
+/* buttons: big and clear */
+html[data-ui="simple"] .btn { min-height: 42px; padding: 9px 18px; font-size: 15px; font-weight: 600; border-width: 1.5px; }
+html[data-ui="simple"] .btn.sm { min-height: 34px; padding: 6px 12px; font-size: 13.5px; }
+html[data-ui="simple"] .btn.lg { min-height: 52px; font-size: 16.5px; padding: 12px 24px; }
+html[data-ui="simple"] .btn.icon { min-height: 36px; padding: 7px; }
+html[data-ui="simple"] .btn.primary { background: var(--brand); border-color: var(--brand); }
+html[data-ui="simple"] .chip { font-size: 14px; padding: 7px 14px; border-width: 1.5px; }
+html[data-ui="simple"] .chip.on { font-weight: 700; }
+
+/* tables: taller rows, zebra stripes */
+html[data-ui="simple"] table.t { font-size: 14.5px; }
+html[data-ui="simple"] table.t th { font-size: 13.5px; padding: 12px; background: #eef2f6; color: var(--text); }
+html[data-ui="simple"] table.t td { padding: 12px; }
+html[data-ui="simple"] table.t tbody tr:nth-child(even) td { background: #f8fafc; }
+
+/* numbers */
+html[data-ui="simple"] .kpi { padding: 18px 20px; border-width: 1.5px; }
+html[data-ui="simple"] .kpi .lbl { font-size: 14px; color: var(--text-2); font-weight: 600; }
+html[data-ui="simple"] .kpi .val { font-size: 30px; }
+html[data-ui="simple"] .kpi::before { width: 6px; }
+
+/* messages */
+html[data-ui="simple"] .infoBox, html[data-ui="simple"] .warnBox { font-size: 14.5px; padding: 12px 16px; }
+html[data-ui="simple"] .stickyFoot { padding: 14px 20px; }
+
+/* dark mode keeps working */
+html[data-ui="simple"][data-theme="dark"] #topbar, html[data-ui="simple"][data-theme="dark"] #sidebar { background: var(--surface); }
+html[data-ui="simple"][data-theme="dark"] #topbar .btn, html[data-ui="simple"][data-theme="dark"] #topbar button { background: var(--surface-2) !important; color: var(--text) !important; }
+html[data-ui="simple"][data-theme="dark"] table.t th { background: var(--surface-2); }
+html[data-ui="simple"][data-theme="dark"] table.t tbody tr:nth-child(even) td { background: rgba(255, 255, 255, .03); }
+html[data-ui="simple"] #topbar .avatar { background: var(--brand); color: #fff; }
+html[data-ui="simple"] #topbar small, html[data-ui="simple"] #topbar .userName small { color: var(--muted); opacity: 1; }
