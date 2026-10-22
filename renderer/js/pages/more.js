@@ -256,8 +256,8 @@ function certificateHTML(p, v, doctor) {
   const body = v.kind === 'sick' ? `بدینوسیله تصدیق می‌شود که محترم/محترمه <b>${esc(p.full_name)}</b> ولد/بنت <b>${esc(p.father_name || '—')}</b> (کد <bdi>${esc(p.code)}</bdi>، سن ${esc(ageLabel(p.birth_date))}) به تاریخ ${fmtDate(v.date)} معاینه گردید. نامبرده به علت مریضی${v.diagnosis ? ` (<bdi class="en">${esc(v.diagnosis)}</bdi>)` : ''} به مدت <b>${esc(v.days)}</b> روز از تاریخ <b>${fmtDate(v.from)}</b> الی <b>${fmtDate(to)}</b> به استراحت ضرورت دارد.`
     : v.kind === 'fit' ? `بدینوسیله تصدیق می‌شود که محترم/محترمه <b>${esc(p.full_name)}</b> ولد/بنت <b>${esc(p.father_name || '—')}</b> (کد <bdi>${esc(p.code)}</bdi>، سن ${esc(ageLabel(p.birth_date))}) به تاریخ ${fmtDate(v.date)} معاینه گردید و از نظر صحی سالم می‌باشد${v.diagnosis ? ` (<bdi class="en">${esc(v.diagnosis)}</bdi>)` : ''}.`
     : `محترم <b>${esc(v.to || '…')}</b><br>مریض <b>${esc(p.full_name)}</b> ولد/بنت <b>${esc(p.father_name || '—')}</b> (کد <bdi>${esc(p.code)}</bdi>، سن ${esc(ageLabel(p.birth_date))}، ${sexFa(p.sex)}) جهت معاینه و تداوی بیشتر خدمت شما معرفی می‌گردد.${v.diagnosis ? `<br>تشخیص ابتدایی: <bdi class="en">${esc(v.diagnosis)}</bdi>` : ''}`;
-  return `<div class="doc size-A5 certDoc">${clinicLetterhead()}<div class="certBody"><h2>${esc(CERT_KINDS[v.kind] || '')}</h2><div class="certDate">تاریخ: ${fmtDate(v.date)}</div><p>${body}</p>${v.body ? `<p>${esc(v.body).replace(/\n/g, '<br>')}</p>` : ''}
-    <div class="certSign"><div>${doctor ? esc(doctorName(doctor)) : ''}<br><small>امضا و مهر داکتر</small></div></div></div>${clinicFooter()}</div>`;
+  return `<div class="doc size-A5 certDoc">${clinicLetterhead('rx', doctor)}<div class="certBody"><h2>${esc(CERT_KINDS[v.kind] || '')}</h2><div class="certDate">تاریخ: ${fmtDate(v.date)}</div><p>${body}</p>${v.body ? `<p>${esc(v.body).replace(/\n/g, '<br>')}</p>` : ''}
+    <div class="certSign"><div>${doctor ? esc(doctorName(doctor)) : ''}<br><small>امضا و مهر داکتر</small></div></div></div>${clinicFooter('', 'rx', doctor)}</div>`;
 }
 
 // ================================================================ doctor: favourite medicines + patient tools inside the visit

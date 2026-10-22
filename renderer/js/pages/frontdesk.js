@@ -2,6 +2,8 @@
    laboratory registration linked to the lab reception, in-patient beds, waiting-room display and the day's accounts. */
 'use strict';
 
+const SEX_CATS = [['nbM', 'نوزاد (پسر)'], ['nbF', 'نوزاد (دختر)'], ['chM', 'خوردسال (پسر)'], ['chF', 'خوردسال (دختر)'], ['M', 'آقا'], ['F', 'خانم']];
+const CASH_SECS = [['visit', 'فیس داکتران'], ['lab', 'لابراتوار'], ['sale', 'دواخانه'], ['admission', 'بستر'], ['deposit', 'امانت']];
 const BILL_KINDS = { visit: ['فیس داکتر', 'kind-visit'], lab: ['لابراتوار', 'kind-lab'], sale: ['دواخانه', 'kind-sale'], admission: ['بستر', 'kind-admission'], deposit: ['امانت', 'kind-deposit'] };
 const kindTag = (k) => `<span class="kindTag ${BILL_KINDS[k]?.[1] || ''}">${esc(BILL_KINDS[k]?.[0] || k)}</span>`;
 const payMethodFa = (m) => m === 'deposit' ? 'از پول امانت' : (PAY_METHODS[m] || m || '');
@@ -202,7 +204,7 @@ Pages.cashier = {
 function ptPickerHTML(pfx) {
   return `<div id="${pfx}"><div class="searchBox" style="margin-bottom:10px"><input data-pp="q" placeholder="جستجوی مریض قبلی: کد، نام یا تلفن…" autocomplete="off"></div><div data-pp="sel"></div>
     <div class="recForm" data-pp="form"><label class="field c3"><span>نام <em>*</em></span><input name="full_name" autocomplete="off"></label><label class="field c3"><span>ولد</span><input name="father_name" autocomplete="off"></label>
-      <label class="field c2"><span>جنس</span><select name="sex">${opt([['M', 'مذکر'], ['F', 'مونث']], 'M')}</select></label><div class="field c4" style="grid-column:span 4"><span>سن (سال / ماه / روز)</span>${ageInputHTML(pfx + 'Age', '', { compact: true })}</div>
+      <label class="field c2"><span>جنس / گروه</span><select data-sexcat>${opt(SEX_CATS, 'M')}</select><input type="hidden" name="sex" value="M"></label><div class="field c4" style="grid-column:span 4"><span>سن (سال / ماه / روز)</span>${ageInputHTML(pfx + 'Age', '', { compact: true })}</div>
       <label class="field c3"><span>تلفن</span><input name="phone" class="ltr" autocomplete="off"></label><label class="field c3"><span>نمبر تذکره (کد ملی)</span><input name="tazkira" class="ltr" autocomplete="off"></label>
       <label class="field c6" style="grid-column:1/-1"><span>آدرس</span><input name="address" autocomplete="off"></label></div></div>`;
 }
@@ -210,9 +212,18 @@ function bindPtPicker(root, pfx, { onPick } = {}) {
   const box = $('#' + pfx, root); let patient = null;
   const form = $('[data-pp="form"]', box), sel = $('[data-pp="sel"]', box);
   bindAgeInput(box, pfx + 'Age');
+  // newborn (≤ 31 days) · child (≤ 14 years) · man · woman — the category sets the sex; the age moves the category
+  const cat = $('[data-sexcat]', box), sexIn = $('[name="sex"]', form);
+  if (cat) {
+    cat.onchange = () => { sexIn.value = cat.value.slice(-1); sexIn.dispatchEvent(new Event('change', { bubbles: true })); };
+    $(`[data-age="${pfx}Age"]`, box)?.addEventListener('input', () => { const a = ageValue(box, pfx + 'Age'); if (!a) return; const days = a.age_years * 365 + a.age_months * 30 + a.age_days; const sx = sexIn.value || 'M';
+      const c = days <= 31 ? 'nb' + sx : a.age_years < 15 ? 'ch' + sx : sx; if (cat.value !== c) { cat.value = c; } });
+  }
   const set = (p) => {
     patient = p || null;
-    if (p) { sel.innerHTML = `<div class="ptHead" style="margin-bottom:8px">${patientHeadHTML(p)}<button type="button" class="btn sm" data-pp="clr">${icon('x', 13)} مریض دیگر</button></div>`; form.classList.add('hidden'); $('[data-pp="clr"]', sel).onclick = () => set(null); }
+    if (p) { sel.innerHTML = `<div class="ptHead" style="margin-bottom:8px">${patientHeadHTML(p)}<button type="button" class="btn sm" data-pp="clr">${icon('x', 13)} مریض دیگر</button></div><div data-pp="hist"></div>`;
+      // earlier laboratory visits of this patient
+      API.list('lab_requests', { 'eq.patient_id': p.id, 'ne.status': 'cancelled', limit: 5 }).then(h => { const el = $('[data-pp="hist"]', sel); if (el && h.length) el.innerHTML = `<div class="prevLabs">${icon('clock', 13)} سابقه آزمایش در لابراتوار: ${h.map(x => `<div><b class="ltr">${esc(x.lab_code)}</b> · ${fmtDate(x.date)} · <span class="en">${esc(x.tests || '')}</span> ${statusPill(LAB_STATUS, x.status)}</div>`).join('')}</div>`; }).catch(() => { }); form.classList.add('hidden'); $('[data-pp="clr"]', sel).onclick = () => set(null); }
     else { sel.innerHTML = ''; form.classList.remove('hidden'); }
     onPick && onPick(patient);
   };
@@ -224,7 +235,7 @@ function bindPtPicker(root, pfx, { onPick } = {}) {
       const f = formValues(form); if (!String(f.full_name || '').trim()) throw new Error('نام مریض را بنویسید یا مریض قبلی را انتخاب کنید');
       return { patient: { ...f, ...(ageValue(box, pfx + 'Age') || {}) } };
     },
-    reset() { set(null); $$('input', form).forEach(i => { i.value = ''; }); $$('[data-a]', box).forEach(i => { i.value = ''; }); }
+    reset() { set(null); $$('input', form).forEach(i => { i.value = ''; }); $$('[data-a]', box).forEach(i => { i.value = ''; }); if (cat) { cat.value = 'M'; sexIn.value = 'M'; } }
   };
 }
 
@@ -479,7 +490,8 @@ Pages['rc-cash'] = {
   async render(view) {
     view.innerHTML = `<div class="pageHead"><div><h1>حسابات روز و تحویل صندوق</h1><p>همه پول‌های گرفته شده امروز از همه بخش‌ها (فیس داکتر، لابراتوار، دواخانه، بستر و امانت)، برداشت‌ها و باقی‌داری‌ها؛ در آخر روز صندوق را تحویل دهید.</p></div>
       <div class="toolbar"><button class="btn" data-act="wd">${icon('wallet')} برداشت از صندوق</button><button class="btn" data-act="print">${icon('print')} چاپ</button><button class="btn" data-act="csv">${icon('download')} CSV</button></div></div>
-      <div class="filterBar"><label class="field"><span>از</span>${dateInput('from', today(), 'id="c_from"')}</label><label class="field"><span>تا</span>${dateInput('to', today(), 'id="c_to"')}</label></div>
+      <div class="filterBar"><label class="field"><span>از</span>${dateInput('from', today(), 'id="c_from"')}</label><label class="field"><span>تا</span>${dateInput('to', today(), 'id="c_to"')}</label>
+        <div class="field"><span>نمایش بخش‌ها</span><div class="chips secChips" id="cSecPick"><button type="button" class="chip on" data-sec="all">همه بخش‌ها</button>${CASH_SECS.map(([k, l]) => `<button type="button" class="chip" data-sec="${k}">${l}</button>`).join('')}</div></div></div>
       <div class="grid g4" id="cK"></div><div class="grid g4" id="cK2" style="margin-top:12px"></div>
       <div class="grid g2" style="margin-top:16px"><div class="card"><h2>به تفکیک بخش</h2><div id="cSec"></div></div><div class="card"><h2>باقی‌داری‌ها (تا این لحظه)</h2><div id="cOut"></div></div></div>
       <div class="grid g2" style="margin-top:16px"><div class="card"><h2>فیس به تفکیک داکتر</h2><div id="cDr"></div></div><div class="card"><h2>به تفکیک خدمت</h2><div id="cSvc"></div></div></div>
@@ -487,34 +499,50 @@ Pages['rc-cash'] = {
         <div class="bar" style="margin-top:8px"><span id="cExp" class="muted"></span><button class="btn primary" data-act="close">${icon('check')} ثبت تحویل صندوق</button></div><div id="cCloses" style="margin-top:10px"></div></div>
       <div class="card" style="margin-top:16px"><h2>همه پرداخت‌ها</h2><div class="filterBar"><label class="field"><span>بخش</span><select id="c_kind">${opt(Object.entries(BILL_KINDS).map(([k, v]) => [k, v[0]]), '', { empty: 'همه' })}</select></label><label class="field grow"><span>جستجو</span><input id="c_q"></label></div><div class="tableWrap" style="max-height:520px"><table class="t"><thead><tr><th>ساعت</th><th>بخش</th><th>کد</th><th>مریض</th><th>شرح</th><th>مبلغ</th><th>طریقه</th><th>ایستگاه</th><th>کاربر</th></tr></thead><tbody id="cPays"></tbody></table></div></div>`;
     let day = null, visits = [];
+    let pick = new Set();   // empty = all sections
+    const on = (k) => !pick.size || pick.has(k);
+    const wdOn = (w) => !pick.size || (w.section === 'lab' && pick.has('lab')) || (w.section === 'pharmacy' && pick.has('sale')) || (w.section === 'reception' && (pick.has('visit') || pick.has('admission')));
     const STN = (s) => STATIONS[s]?.name || (s === 'browser' || !s ? 'پذیرش' : s);
     const drawPays = () => {
       const k = $('#c_kind', view).value, q = $('#c_q', view).value.trim().toLowerCase();
-      const rows = day.payments.filter(x => (!k || x.kind === k) && (!q || [x.full_name, x.code, x.patient_code, x.detail].some(v => String(v || '').toLowerCase().includes(q))));
+      const rows = day.payments.filter(x => on(x.kind) && (!k || x.kind === k) && (!q || [x.full_name, x.code, x.patient_code, x.detail].some(v => String(v || '').toLowerCase().includes(q))));
       $('#cPays', view).innerHTML = rows.map(x => `<tr><td class="nowrap">${day.from === day.to ? fmtTime(x.created_at) : fmtDateTime(x.created_at)}</td><td>${kindTag(x.kind)}</td><td class="codeTag">${esc(x.code || '')}</td><td>${esc(x.full_name || '')} <small class="muted">${esc(x.patient_code || '')}</small></td><td class="small">${esc(x.detail || x.note || '')}</td><td class="${x.amount < 0 ? 'neg' : ''}"><b>${money(x.amount)}</b></td><td>${esc(payMethodFa(x.method))}</td><td>${esc(STN(x.station))}</td><td>${esc(x.user_name || '')}</td></tr>`).join('') || emptyRow(9);
     };
     const load = async () => {
       const from = dateOf($('#c_from', view)), to = dateOf($('#c_to', view)) || from;
       [day, visits] = await Promise.all([API.get('/api/cashier/day', { from, to }), API.list('visits', { from, to, 'ne.status': 'cancelled', limit: 10000 })]);
+      draw();
+    };
+    // everything below follows the chosen sections (all, or e.g. only the laboratory)
+    const draw = () => {
       const t = day.totals, o = day.outstanding;
-      $('#cK', view).innerHTML = kpi('مجموع دریافت (همه بخش‌ها)', money(t.all), { ic: 'cash', cls: 'good', sub: currency() }) + kpi('برداشت‌ها و مصارف', money(t.withdrawals + t.expenses), { ic: 'wallet', cls: 'warn' }) + kpi('صندوق خالص', money(t.net), { ic: 'money', cls: 'violet' }) + kpi('بازپرداخت‌ها', money(t.refunds), { ic: 'percent', cls: 'bad' });
-      $('#cK2', view).innerHTML = kpi('فیس داکتر', money(t.visit), { ic: 'steth', cls: 'info', sub: `${visits.filter(v => v.status !== 'reserved').length} مریض` }) + kpi('لابراتوار', money(t.lab), { ic: 'flask' }) + kpi('دواخانه', money(t.sale), { ic: 'pill' }) + kpi('بستر و امانت', money(t.admission + t.deposit), { ic: 'bed' });
-      const secRows = [['visit', t.visit], ['lab', t.lab], ['sale', t.sale], ['admission', t.admission], ['deposit', t.deposit]];
-      $('#cSec', view).innerHTML = `<table class="t"><thead><tr><th>بخش</th><th>تعداد پرداخت</th><th>مبلغ</th></tr></thead><tbody>${secRows.map(([k, v]) => `<tr><td>${kindTag(k)}</td><td>${day.payments.filter(x => x.kind === k).length}</td><td><b>${money(v)}</b></td></tr>`).join('')}
-        <tr><td>دریافت در پذیرش</td><td></td><td>${money(t.at_reception)}</td></tr>${t.at_sections ? `<tr><td>دریافت در خود بخش‌ها</td><td></td><td>${money(t.at_sections)}</td></tr>` : ''}
-        ${day.withdrawals.map(w => `<tr class="neg"><td>برداشت ${esc(wdKindName(w.section, w.kind))}${w.person ? ' — ' + esc(w.person) : ''}: ${esc(w.by_whom || '')} ${esc(w.note || '')}</td><td>${esc(SECTIONS[w.section] || w.section || '')}</td><td>-${money(w.amount)}</td></tr>`).join('')}${t.expenses ? `<tr class="neg"><td>مصارف (انبار و حسابات)</td><td></td><td>-${money(t.expenses)}</td></tr>` : ''}
-        <tr><td><b>صندوق خالص</b></td><td></td><td><b>${money(t.net)}</b></td></tr></tbody></table>`;
-      $('#cOut', view).innerHTML = `<table class="t"><tbody><tr><td>باقی فیس داکتر</td><td><b>${money(o.visits)}</b></td></tr>${o.refunds_due ? `<tr><td>قابل بازپرداخت (تخفیف داکتر)</td><td class="neg">${money(o.refunds_due)}</td></tr>` : ''}<tr><td>لابراتوار (باقی)</td><td><b>${money(o.labs)}</b> ${o.labs_to_bill ? `<small class="muted">+ ${o.labs_to_bill} درخواست بل نشده</small>` : ''}</td></tr>
-        <tr><td>دواخانه (باقی)</td><td><b>${money(o.sales)}</b></td></tr><tr><td>بستر (باقی)</td><td><b>${money(o.admissions)}</b></td></tr></tbody></table><button class="btn sm" data-act="cashier" style="margin-top:8px">${icon('cash', 13)} رفتن به صندوق مرکزی</button>`;
+      const secRows = [['visit', t.visit], ['lab', t.lab], ['sale', t.sale], ['admission', t.admission], ['deposit', t.deposit]].filter(([k]) => on(k));
+      const inc = r2(secRows.reduce((a, x) => a + x[1], 0)), wds = day.withdrawals.filter(wdOn), wdSum = r2(wds.reduce((a, w) => a + w.amount, 0)), exp = pick.size ? 0 : t.expenses;
+      const net = r2(inc - wdSum - exp);
+      view._sel = { inc, wdSum, exp, net, secRows, wds };
+      $('#cK', view).innerHTML = kpi(pick.size ? 'مجموع دریافت (بخش‌های انتخاب شده)' : 'مجموع دریافت (همه بخش‌ها)', money(inc), { ic: 'cash', cls: 'good', sub: currency() }) + kpi('برداشت‌ها' + (exp ? ' و مصارف' : ''), money(wdSum + exp), { ic: 'wallet', cls: 'warn' }) + kpi('صندوق خالص', money(net), { ic: 'money', cls: 'violet' }) + kpi('بازپرداخت‌ها', money(t.refunds), { ic: 'percent', cls: 'bad' });
+      $('#cK2', view).innerHTML = [['visit', kpi('فیس داکتر', money(t.visit), { ic: 'steth', cls: 'info', sub: `${visits.filter(v => v.status !== 'reserved').length} مریض` })], ['lab', kpi('لابراتوار', money(t.lab), { ic: 'flask' })], ['sale', kpi('دواخانه', money(t.sale), { ic: 'pill' })], ['admission', kpi('بستر و امانت', money(t.admission + t.deposit), { ic: 'bed' })]].filter(([k]) => on(k)).map(x => x[1]).join('');
+      $$('#cK2 .kpi', view).forEach((el, i) => { el.classList.add('clickable'); el.dataset.kind = ['visit', 'lab', 'sale', 'admission'].filter(on)[i]; });
+      $('#cSec', view).innerHTML = `<table class="t"><thead><tr><th>بخش</th><th>تعداد پرداخت</th><th>مبلغ</th></tr></thead><tbody>${secRows.map(([k, v]) => `<tr class="clickable" data-kind="${k}"><td>${kindTag(k)}</td><td>${day.payments.filter(x => x.kind === k).length}</td><td><b>${money(v)}</b></td></tr>`).join('')}
+        ${!pick.size ? `<tr><td>دریافت در پذیرش</td><td></td><td>${money(t.at_reception)}</td></tr>${t.at_sections ? `<tr><td>دریافت در خود بخش‌ها</td><td></td><td>${money(t.at_sections)}</td></tr>` : ''}` : ''}
+        ${wds.map(w => `<tr class="neg"><td>برداشت ${esc(wdKindName(w.section, w.kind))}${w.person ? ' — ' + esc(w.person) : ''}: ${esc(w.by_whom || '')} ${esc(w.note || '')}</td><td>${esc(SECTIONS[w.section] || w.section || '')}</td><td>-${money(w.amount)}</td></tr>`).join('')}${exp ? `<tr class="neg"><td>مصارف (انبار و حسابات)</td><td></td><td>-${money(exp)}</td></tr>` : ''}
+        <tr><td><b>صندوق خالص</b></td><td></td><td><b>${money(net)}</b></td></tr></tbody></table>`;
+      $('#cOut', view).innerHTML = `<table class="t"><tbody>${on('visit') ? `<tr><td>باقی فیس داکتر</td><td><b>${money(o.visits)}</b></td></tr>${o.refunds_due ? `<tr><td>قابل بازپرداخت (تخفیف داکتر)</td><td class="neg">${money(o.refunds_due)}</td></tr>` : ''}` : ''}${on('lab') ? `<tr><td>لابراتوار (باقی)</td><td><b>${money(o.labs)}</b> ${o.labs_to_bill ? `<small class="muted">+ ${o.labs_to_bill} درخواست بل نشده</small>` : ''}</td></tr>` : ''}
+        ${on('sale') ? `<tr><td>دواخانه (باقی)</td><td><b>${money(o.sales)}</b></td></tr>` : ''}${on('admission') ? `<tr><td>بستر (باقی)</td><td><b>${money(o.admissions)}</b></td></tr>` : ''}</tbody></table><button class="btn sm" data-act="cashier" style="margin-top:8px">${icon('cash', 13)} رفتن به صندوق مرکزی</button>`;
+      $('#cDr', view).closest('.grid').classList.toggle('hidden', !on('visit'));
       $('#cDr', view).innerHTML = `<table class="t"><thead><tr><th>داکتر</th><th>مریض</th><th>دریافت فیس</th></tr></thead><tbody>${day.byDoctor.map(d => `<tr><td>${esc(d.name ? doctorName(d) : 'بدون داکتر')}</td><td>${d.visits}</td><td>${money(d.amount)}</td></tr>`).join('') || emptyRow(3)}</tbody></table>`;
       const act = visits.filter(v => v.status !== 'reserved');
       const g = new Map(); act.forEach(v => { const k2 = v.service_name || '—'; const x = g.get(k2) || { n: 0, s: 0 }; x.n++; x.s += v.net; g.set(k2, x); });
       $('#cSvc', view).innerHTML = `<table class="t"><thead><tr><th>خدمت</th><th>تعداد</th><th>فیس</th></tr></thead><tbody>${[...g.entries()].sort((a, b) => b[1].s - a[1].s).map(([k2, x]) => `<tr><td>${esc(k2)}</td><td>${x.n}</td><td>${money(x.s)}</td></tr>`).join('') || emptyRow(3)}</tbody></table>`;
-      $('#cExp', view).innerHTML = `باید در صندوق باشد: <b>${money(t.net - day.payments.filter(x => x.method && x.method !== 'cash' && x.method !== 'deposit').reduce((a, x) => a + x.amount, 0))}</b> ${currency()} <small>(فقط نقد)</small>`;
+      $('#cExp', view).innerHTML = `باید در صندوق باشد (همه بخش‌ها): <b>${money(t.net - day.payments.filter(x => x.method && x.method !== 'cash' && x.method !== 'deposit').reduce((a, x) => a + x.amount, 0))}</b> ${currency()} <small>(فقط نقد)</small>`;
       $('#cCloses', view).innerHTML = day.closes.length ? `<table class="t"><thead><tr><th>زمان</th><th>باید باشد</th><th>شمرده شد</th><th>تفاوت</th><th>تحویل به</th><th>توسط</th><th>یادداشت</th></tr></thead><tbody>${day.closes.map(c => `<tr><td>${fmtDateTime(c.created_at)}</td><td>${money(c.expected)}</td><td>${money(c.counted)}</td><td class="${Math.abs(c.difference) > 0.001 ? 'neg' : 'pos'}">${money(c.difference)}</td><td>${esc(c.handed_to || '')}</td><td>${esc(c.user_name || '')}</td><td>${esc(c.note || '')}</td></tr>`).join('')}</tbody></table>` : '<div class="muted small">امروز صندوق تحویل نشده</div>';
       drawPays();
     };
     $$('#c_from, #c_to', view).forEach(el => el.addEventListener('change', load));
+    const syncPick = () => $$('#cSecPick .chip', view).forEach(c => c.classList.toggle('on', c.dataset.sec === 'all' ? !pick.size : pick.has(c.dataset.sec)));
+    $('#cSecPick', view).onclick = (e) => { const b = e.target.closest('[data-sec]'); if (!b) return; if (b.dataset.sec === 'all') pick.clear(); else pick.has(b.dataset.sec) ? pick.delete(b.dataset.sec) : pick.add(b.dataset.sec); syncPick(); draw(); };
+    // click on a section → every amount of that section
+    view.addEventListener('click', (e) => { const k = e.target.closest('[data-kind]'); if (k && day && !e.target.closest('#cSecPick')) sectionDetails(k.dataset.kind, day.from, day.to, day.payments); });
     $('#c_kind', view).addEventListener('change', drawPays); $('#c_q', view).addEventListener('input', debounce(drawPays, 200));
     const cashExpected = () => r2(day.totals.net - day.payments.filter(x => x.method && x.method !== 'cash' && x.method !== 'deposit').reduce((a, x) => a + x.amount, 0));
     actions(view, {
@@ -526,10 +554,30 @@ Pages['rc-cash'] = {
         $$('input', $('#cClose', view)).forEach(i => { i.value = ''; }); load();
       }),
       wd: () => withdrawalDialog('reception', load),
+      // print: choose the sections (all / lab / pharmacy / doctors …) and which parts go on the paper
       print: () => {
-        const html = `<p>بازه: ${fmtDate(day.from)} تا ${fmtDate(day.to)}</p><h3>به تفکیک بخش</h3>${$('#cSec', view).innerHTML}<h3>باقی‌داری‌ها</h3>${$('#cOut', view).innerHTML.replace(/<button[\s\S]*?<\/button>/g, '')}<h3>داکتران</h3>${$('#cDr', view).innerHTML}<h3>خدمات</h3>${$('#cSvc', view).innerHTML}
-          <h3>پرداخت‌ها</h3><table class="rt rtl"><thead><tr><th>زمان</th><th>بخش</th><th>کد</th><th>مریض</th><th>مبلغ</th><th>طریقه</th></tr></thead><tbody>${day.payments.map(x => `<tr><td>${fmtDateTimeNum(x.created_at)}</td><td>${esc(BILL_KINDS[x.kind]?.[0] || x.kind)}</td><td>${esc(x.code || '')}</td><td>${esc(x.full_name || '')}</td><td>${money(x.amount)}</td><td>${esc(payMethodFa(x.method))}</td></tr>`).join('')}</tbody></table>`;
-        previewDoc(reportDocHTML('حسابات روز — صندوق پذیرش', html), { title: 'حسابات روز' });
+        const PARTS = [['sum', 'جمع و صندوق خالص', 1], ['sec', 'به تفکیک بخش و برداشت‌ها', 1], ['out', 'باقی‌داری‌ها', 0], ['dr', 'فیس به تفکیک داکتر', 1], ['svc', 'به تفکیک خدمت', 0], ['close', 'تحویل صندوق', 0], ['pays', 'لیست همه پرداخت‌ها', 0]];
+        const saved = (() => { try { return JSON.parse(localGet('cash_print_parts', 'null')); } catch (_) { return null; } })();
+        const m = modal({ title: 'چاپ حسابات روز — چه چیزی چاپ شود؟', size: 'wide', body: `<div class="field"><span>بخش‌ها</span><div class="chips secChips" id="ppSec"><button type="button" class="chip ${pick.size ? '' : 'on'}" data-sec="all">همه بخش‌ها</button>${CASH_SECS.map(([k, l]) => `<button type="button" class="chip ${pick.has(k) ? 'on' : ''}" data-sec="${k}">${l}</button>`).join('')}</div></div>
+          <div class="secTitle" style="margin-top:12px">قسمت‌های ورق</div><div class="printPick">${PARTS.map(([k, l, d]) => `<label class="check"><input type="checkbox" data-part="${k}" ${(saved ? saved.includes(k) : d) ? 'checked' : ''}> ${l}</label>`).join('')}</div>`,
+          foot: `<button class="btn primary" id="pp_ok">${icon('print')} پیش‌نمایش و چاپ</button>` });
+        const tmp = new Set(pick);
+        $('#ppSec', m.el).onclick = (e) => { const b = e.target.closest('[data-sec]'); if (!b) return; if (b.dataset.sec === 'all') tmp.clear(); else tmp.has(b.dataset.sec) ? tmp.delete(b.dataset.sec) : tmp.add(b.dataset.sec); $$('#ppSec .chip', m.el).forEach(c => c.classList.toggle('on', c.dataset.sec === 'all' ? !tmp.size : tmp.has(c.dataset.sec))); };
+        $('#pp_ok', m.el).onclick = () => {
+          const parts = $$('[data-part]', m.el).filter(c => c.checked).map(c => c.dataset.part); localSet('cash_print_parts', JSON.stringify(parts));
+          pick = tmp; syncPick(); draw(); m.close();
+          const S = view._sel, names = pick.size ? CASH_SECS.filter(([k]) => pick.has(k)).map(x => x[1]).join('، ') : 'همه بخش‌ها';
+          const strip = (h) => h.replace(/<button[\s\S]*?<\/button>/g, '').replace(/class="t"/g, 'class="rt"');
+          let html = `<p>بازه: ${fmtDate(day.from)} تا ${fmtDate(day.to)} — بخش‌ها: <b>${esc(names)}</b></p>`;
+          if (parts.includes('sum')) html += `<table class="rt"><tr><td>مجموع دریافت</td><td><b>${money(S.inc)}</b></td></tr><tr><td>برداشت‌ها${S.exp ? ' و مصارف' : ''}</td><td>-${money(S.wdSum + S.exp)}</td></tr><tr><td><b>صندوق خالص</b></td><td><b>${money(S.net)} ${esc(currency())}</b></td></tr></table>`;
+          if (parts.includes('sec')) html += `<h3>به تفکیک بخش</h3>${strip($('#cSec', view).innerHTML)}`;
+          if (parts.includes('out')) html += `<h3>باقی‌داری‌ها</h3>${strip($('#cOut', view).innerHTML)}`;
+          if (parts.includes('dr') && on('visit')) html += `<h3>داکتران</h3>${strip($('#cDr', view).innerHTML)}`;
+          if (parts.includes('svc') && on('visit')) html += `<h3>خدمات</h3>${strip($('#cSvc', view).innerHTML)}`;
+          if (parts.includes('close')) html += `<h3>تحویل صندوق</h3>${strip($('#cCloses', view).innerHTML)}`;
+          if (parts.includes('pays')) html += `<h3>پرداخت‌ها</h3><table class="rt rtl"><thead><tr><th>زمان</th><th>بخش</th><th>کد</th><th>مریض</th><th>مبلغ</th><th>طریقه</th></tr></thead><tbody>${day.payments.filter(x => on(x.kind)).map(x => `<tr><td>${fmtDateTimeNum(x.created_at)}</td><td>${esc(BILL_KINDS[x.kind]?.[0] || x.kind)}</td><td>${esc(x.code || '')}</td><td>${esc(x.full_name || '')}</td><td>${money(x.amount)}</td><td>${esc(payMethodFa(x.method))}</td></tr>`).join('')}</tbody></table>`;
+          previewDoc(reportDocHTML('حسابات روز' + (pick.size ? ' — ' + names : ''), html), { title: 'حسابات روز' });
+        };
       },
       csv: () => exportCSV('cashier-' + day.from, day.payments, [['created_at', 'زمان'], [x => BILL_KINDS[x.kind]?.[0] || x.kind, 'بخش'], ['code', 'کد'], ['patient_code', 'کد مریض'], ['full_name', 'نام'], ['detail', 'شرح'], ['amount', 'مبلغ'], [x => payMethodFa(x.method), 'طریقه'], [x => STN(x.station), 'ایستگاه'], ['user_name', 'کاربر']])
     });

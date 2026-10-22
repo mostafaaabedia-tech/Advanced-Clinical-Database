@@ -134,9 +134,11 @@ Pages['lab-reports'] = {
         <label class="field"><span>درصد نمایش مبالغ</span><input id="i_pct" type="number" value="100"></label>
         <label class="field span2"><span>جستجوی پزشک</span><input id="i_q"></label></div>
         <div class="bar" style="margin-top:10px"><button class="btn primary" data-act="runI">${icon('search')} تأیید</button></div></div>
-        <div class="grid g2" style="margin-top:14px"><div class="card"><div id="iOut"></div></div><div class="card"><h2>نمودار ترند معرفی بیمار توسط پزشک به تفکیک ماه</h2><select id="i_doc" style="margin-bottom:8px"></select><div class="chartBox"><canvas id="iC"></canvas></div><div class="mini muted">۱۲ ماه گذشته</div></div></div>`;
+        <div class="card" style="margin-top:14px"><h2>${icon('list')} درآمد، تخفیف و خالص هر پزشک</h2><div class="tableWrap" id="iOut"></div></div>
+        <div class="grid g2"><div class="card"><h2>${icon('chart')} مقایسه پزشکان (درآمد · تخفیف · خالص)</h2><div class="chartBox tall"><canvas id="iD"></canvas></div><div class="mini muted">۱۲ پزشک اول همین لیست — هر رنگ یک مقدار جدا</div></div>
+        <div class="card"><h2>${icon('trend')} روند ماهانه</h2><div class="bar" style="margin-bottom:8px"><select id="i_doc" style="width:auto"></select><select id="i_metric" style="width:auto">${opt([['money', 'درآمد · تخفیف · خالص'], ['c', 'تعداد معرفی'], ['s', 'فقط درآمد'], ['d', 'فقط تخفیف'], ['n', 'فقط خالص']], 'money')}</select></div><div class="chartBox tall"><canvas id="iC"></canvas></div><div class="mini muted">۱۲ ماه گذشته</div></div></div>`;
       $('#i_q', view).addEventListener('input', debounce(drawIncome, 150)); $('#i_sort', view).onchange = drawIncome; $('#i_pct', view).oninput = debounce(drawIncome, 200);
-      $('#i_doc', view).onchange = drawTrend;
+      $('#i_doc', view).onchange = drawTrend; $('#i_metric', view).onchange = drawTrend;
       view._months = months;
     };
     const drawIncome = () => {
@@ -150,13 +152,21 @@ Pages['lab-reports'] = {
         <tfoot><tr><td colspan="3">مجموع</td><td>${S('patients')}</td><td>${S('requests')}</td><td>${S('tests')}</td><td>${money(S('income') * pct)}</td><td>${money(S('discount') * pct)}</td><td>${money(S('net') * pct)}</td></tr></tfoot></table>`;
       const cur = $('#i_doc', view).value;
       $('#i_doc', view).innerHTML = opt([['all', 'همه پزشکان'], ...inc.rows.map(r => [r.k, r.name])], cur || 'all');
+      view._incRows = rows; view._pct = pct;
       drawTrend();
     };
+    // two separate charts: doctors side by side (three separate bars each), and the monthly trend — never stacked on each other
     const drawTrend = () => {
       if (!inc) return;
-      const k = $('#i_doc', view).value || 'all', months = view._months;
-      const vals = months.map(m => inc.trend.filter(x => (k === 'all' || x.k === k) && x.date >= m.range[0] && x.date <= m.range[1]).reduce((a, x) => a + x.c, 0));
-      destroyCharts(); barChart($('#iC', view), months.map(m => m.short), [{ label: 'تعداد معرفی', data: vals }]);
+      destroyCharts();
+      const top = (view._incRows || inc.rows).slice(0, 12), pct = view._pct || 1;
+      barChart($('#iD', view), top.map(r => r.name.length > 18 ? r.name.slice(0, 17) + '…' : r.name), [
+        { label: 'درآمد', data: top.map(r => r2(r.income * pct)), color: '#2a78d6' }, { label: 'تخفیف', data: top.map(r => r2(r.discount * pct)), color: '#eb6834' }, { label: 'خالص', data: top.map(r => r2(r.net * pct)), color: '#1baf7a' }], { money: true });
+      const k = $('#i_doc', view).value || 'all', months = view._months, metric = $('#i_metric', view).value || 'money';
+      const sum = (m, f) => inc.trend.filter(x => (k === 'all' || x.k === k) && x.date >= m.range[0] && x.date <= m.range[1]).reduce((a, x) => a + (x[f] || 0), 0);
+      const L = { c: 'تعداد معرفی', s: 'درآمد', d: 'تخفیف', n: 'خالص' }, C = { c: '#6250d6', s: '#2a78d6', d: '#eb6834', n: '#1baf7a' };
+      const fields = metric === 'money' ? ['s', 'd', 'n'] : [metric];
+      barChart($('#iC', view), months.map(m => m.short), fields.map(f => ({ label: L[f], data: months.map(m => r2(sum(m, f) * (f === 'c' ? 1 : pct))), color: C[f] })), { money: metric !== 'c' });
     };
     const runStats = async () => { data = await API.get('/api/lab/stats', statsQuery()); drawStats(); };
     const runIncome = async () => { const months = view._months; inc = await API.get('/api/lab/doctor-income', { from: dateOf($('#i_from', view)), to: dateOf($('#i_to', view)), dept_id: $('#i_dep', view).value, source: $('#i_src', view).value, trend_from: months[0].range[0], trend_to: today() }); drawIncome(); };

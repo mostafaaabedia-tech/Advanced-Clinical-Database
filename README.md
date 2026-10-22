@@ -27,6 +27,15 @@ flowchart TB
 
 Every station has light / dark / automatic mode and its own colour (Admin → settings → station colours, or *this computer*).
 
+**New in v1.5**
+- **Menus and sections can be switched off / on** for every station in *Settings → منوها و بخش‌ها* (a page that is off disappears from that station's menu and cannot be opened; switch it on again there) and the menu order can be changed. The admin menu is smaller by default (laboratory: one summary page; pharmacy: sales lists and accounts, no selling; reception: central cashier, daily accounts, all withdrawals and monthly accounts).
+- **Arrange a page** (admin, ✎ button at the top): hide / show and move tabs, cards and number boxes, switch a chart between bars and lines — for all computers; hidden parts are listed in Settings and can be shown again.
+- **Laboratory like before**: the v1.4 laboratory extras (QC, TAT, report verification, delta check, critical call form, QR on the report, auto-approval) are off by default and can be switched on. Lab reception: test price, discount and payment on the same page (register, receive and print in one step). Answer codes for option results (e.g. 32 = Yellow), ✱ star for tests not needed on the report, newborn / child / man / woman, the patient's earlier lab visits, delete a wrong registration, profit per test, monthly material report (start, bought, used, end) and low-material warning, results to the doctor by WhatsApp / Telegram, urine microscopy beside the physical / chemical part.
+- **Reception**: the laboratory registration is removed from the reception; the reception sends the patient to the laboratory (by code or from the queue) and the laboratory is told when the fee is paid in the central cashier or a balance is left. Daily accounts: show only the chosen sections (doctors, laboratory, pharmacy, beds) and choose what is printed (no payments list by default). Withdrawals of all sections in one page.
+- **Admin**: laboratory summary (received tests with price, patients, number of tests, reagents used and bought with factor numbers), pharmacy summary (medicines sold today / this month, stock, shortages of the pharmacy and the laboratory at a chosen number, e.g. 3), click on any money box of the dashboards to see every amount behind it.
+- **Headers like Word**: every section designs its own header / footer — prescription (all doctors or one doctor), laboratory report (repeated on every page), reports and certificates, receipts of the reception, pharmacy and laboratory — with fonts, sizes, colours, alignment, logo / pictures, a three-column layout, lines and fields (clinic, phones, address, doctor, date).
+- A station's program opens only for the users of that section (also the admin, unless allowed in Settings). Doctors' income in the laboratory: separate charts for income, discount and net. Tidy alignment (cards of one row have the same height), faster page animation, better fit on small screens.
+
 **v1.4.1** — dark mode with the new look: page, menu, top bar, tables and coloured text now all follow the dark palette (no more light page with dark cards).
 
 **New in v1.4**

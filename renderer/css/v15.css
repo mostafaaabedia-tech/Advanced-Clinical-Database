@@ -1,0 +1,87 @@
+/* v1.5: menu / page layout editing, tidy alignment, header designer, admin summaries, print chooser */
+
+/* ---------- hidden parts (layout) ---------- */
+.lyHidden { display: none !important; }
+html.lyEdit .lyHidden { display: revert !important; opacity: .35; outline: 2px dashed var(--bad); }
+html.lyEdit .card.lyHidden, html.lyEdit .kpi.lyHidden { display: block !important; }
+html.lyEdit .tabs > button.lyHidden { display: inline-flex !important; }
+html.lyEdit .card, html.lyEdit .kpi, html.lyEdit .tabs > button { position: relative; outline: 1px dashed var(--line-2); outline-offset: 2px; }
+.lyTools { position: absolute; top: -10px; left: 6px; z-index: 6; display: inline-flex; gap: 2px; background: var(--surface); border: 1px solid var(--line-2); border-radius: 8px; padding: 1px 3px; box-shadow: 0 4px 12px rgba(0,0,0,.15); font-style: normal; line-height: 1; }
+.lyTools i { font-style: normal; cursor: pointer; padding: 3px 5px; border-radius: 6px; font-size: 12px; user-select: none; }
+.lyTools i:hover { background: var(--brand-soft); }
+.tabs > button > .lyTools { top: -14px; }
+.lyBar { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; align-items: center; gap: 10px; background: var(--surface); border: 2px solid var(--brand); border-radius: 14px; padding: 10px 14px; box-shadow: 0 16px 40px rgba(0,0,0,.25); }
+.navCfgList { max-height: 520px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 6px; }
+.navCfgRow { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 8px; }
+.navCfgRow:nth-child(even) { background: var(--surface-2); }
+.navCfgRow.off { opacity: .5; }
+.navCfgRow .check { display: inline-flex; align-items: center; gap: 8px; }
+.navCfgGroup { font-weight: 700; color: var(--brand-ink); padding: 10px 8px 4px; border-top: 1px solid var(--line); margin-top: 4px; }
+.navCfgGroup:first-child { border-top: 0; margin-top: 0; }
+
+/* ---------- tidy alignment: cards of one row have the same height, bars line up ---------- */
+.grid { align-items: stretch; }
+.grid > .card { margin-bottom: 0; display: flex; flex-direction: column; }
+.grid > .card > .chartBox, .grid > .card > .tableWrap { flex: 1; }
+.grid + .grid, .grid + .card, .card + .grid { margin-top: 16px; }
+.pageHead .toolbar { margin-inline-start: auto; }
+.toolbar > select, .toolbar > .field { margin: 0; }
+.filterBar { align-items: end; }
+.tabs { align-items: flex-end; overflow-x: auto; scrollbar-width: thin; flex-wrap: nowrap; }
+.tabs > button { white-space: nowrap; }
+.kpi .val { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chartBox { position: relative; min-height: 220px; }
+@media (max-width: 1100px) {
+  #app { grid-template-columns: 200px 1fr; }
+  .g4, .g5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .g2, .g-21, .g-12, .g3 { grid-template-columns: 1fr; }
+  .recGrid { grid-template-columns: 1fr !important; }
+}
+@media (max-width: 760px) {
+  #app { grid-template-columns: 170px 1fr; }
+  #view { padding: 14px 12px 40px !important; }
+  .g4, .g5 { grid-template-columns: 1fr; }
+}
+
+/* ---------- clickable money boxes (details) ---------- */
+.kpi.clickable { cursor: pointer; }
+.kpi.clickable::after { content: '…'; position: absolute; left: 12px; bottom: 8px; color: var(--muted); font-weight: 700; }
+.kpi.clickable:hover { border-color: var(--brand); }
+
+/* ---------- print chooser ---------- */
+.printPick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; }
+.secChips .chip.on { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+/* ---------- lab walk-in: price, discount and payment together ---------- */
+.payBox { margin-top: 12px; border-top: 1.5px dashed var(--line-2); padding-top: 12px; }
+.payBox .totals > div { align-items: center; }
+
+/* ---------- header designer ---------- */
+.hdrTools { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 8px; border: 1px solid var(--line); border-bottom: 0; border-radius: 10px 10px 0 0; background: var(--surface-2); position: sticky; top: 0; z-index: 3; }
+.hdrTools .btn { min-height: 32px !important; padding: 4px 9px !important; font-size: 13px !important; }
+.hdrTools select { width: auto !important; min-height: 32px !important; padding: 4px 8px !important; font-size: 13px !important; }
+.hdrTools input[type=color] { width: 36px; height: 32px; padding: 0; border: 1px solid var(--line-2); border-radius: 6px; }
+.hdrTools .sep { width: 1px; height: 22px; background: var(--line-2); margin: 0 4px; }
+.hdrEdit { border: 1px solid var(--line); border-radius: 0 0 10px 10px; background: #fff; color: #111; min-height: 160px; padding: 6mm 8mm; overflow: auto; direction: rtl; outline: none; font-family: Vazirmatn, Tahoma, sans-serif; }
+.hdrEdit:focus { box-shadow: 0 0 0 3px var(--brand-soft); }
+.hdrEdit table { width: 100%; border-collapse: collapse; }
+.hdrEdit table td { border: 1px dashed #c3ccd7; padding: 4px 6px; vertical-align: middle; }
+.hdrEdit img { max-height: 30mm; }
+.hdrPaper { width: 210mm; zoom: .8; margin: 0 auto; }
+.hdrKinds .chip { margin-bottom: 4px; }
+.lh.custom table { width: 100%; border-collapse: collapse; }
+.lh.custom table td { border: 0; padding: 1mm 2mm; vertical-align: middle; }
+.lh.custom img { max-height: 32mm; }
+.lhFoot.custom { margin-top: auto; }
+.rcHead.custom { text-align: center; }
+.rcHead.custom img { max-height: 16mm; }
+
+/* ---------- lab: patient reception (attachment 1) ---------- */
+.ptRow2 { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 10px; }
+.ageSexRow { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: end; }
+.prevLabs { font-size: 12.5px; background: var(--info-soft); border-radius: 10px; padding: 8px 10px; margin-top: 8px; }
+.prevLabs b { color: var(--brand-ink); }
+
+html[data-theme="dark"] .hdrEdit { background: #fff; color: #111; }
+html[data-theme="dark"] .lyTools { background: var(--surface-2); }
+@media print { .lyTools, .lyBar { display: none !important; } }

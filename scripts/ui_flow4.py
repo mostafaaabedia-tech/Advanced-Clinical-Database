@@ -86,7 +86,7 @@ with sync_playwright() as p:
   rc.click('[data-foldbtn=rclab]'); rc.wait_for_timeout(200); shot(rc, 'f4-09-rclab-folded')
   ok(rc.evaluate("getComputedStyle(document.querySelector('.pickWrap[data-fold=rclab] .pickBody')).display") == 'none', 'lab reception test buttons can be hidden')
   rc.click('[data-foldbtn=rclab]')
-  rc.evaluate("go('rc-wd')"); rc.wait_for_timeout(900)
+  rc.evaluate("go('all-wd')"); rc.wait_for_timeout(900)   # v1.5: all withdrawals in one page
   rc.click('[data-act=new]'); rc.wait_for_timeout(400)
   rc.select_option('#wdF [name=section]', 'lab'); rc.select_option('#wdKind', 'external'); rc.fill('#wdF [name=amount]', '300'); rc.fill('#wdF [name=person]', 'لابراتوار مرکزی'); rc.fill('#wdF [name=note]', 'Vitamin D ارسالی')
   shot(rc, 'f4-10-withdrawal-lab'); rc.click('#wd_ok'); rc.wait_for_timeout(900)

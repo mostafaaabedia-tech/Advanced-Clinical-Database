@@ -683,7 +683,7 @@ function makeOps(db, bus) {
     const months = Math.max(0, n(setting('lab_prev_months', '6'), 6));
     const from = (() => { const d = new Date(); d.setMonth(d.getMonth() - (months || 120)); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; })();
     const rows = db.all(`SELECT x.test_id, x.value, x.flag, x.unit, r.date, r.lab_code, r.id request_id FROM lab_results x JOIN lab_requests r ON r.id=x.request_id
-      WHERE r.patient_id=? AND r.id<>? AND r.status NOT IN ('cancelled') AND r.date>=? AND x.test_id IN (${testIds.map(Number).join(',')}) AND IFNULL(x.value,'')<>'' ORDER BY r.date DESC, r.id DESC`, [patientId, excludeReq || 0, from]);
+      WHERE r.patient_id=? AND r.id<>? AND r.status NOT IN ('cancelled') AND r.date>=? AND x.test_id IN (${testIds.map(Number).join(',')}) AND IFNULL(x.value,'') NOT IN ('','*') ORDER BY r.date DESC, r.id DESC`, [patientId, excludeReq || 0, from]);
     const out = {};
     for (const x of rows) { (out[x.test_id] = out[x.test_id] || []); if (out[x.test_id].length < 4) out[x.test_id].push(x); }
     return out;
@@ -691,7 +691,7 @@ function makeOps(db, bus) {
   // full history of one test for one patient (trend chart)
   function labTestHistory(patientId, testId) {
     return db.all(`SELECT x.value, x.flag, x.unit, x.ref, r.date, r.lab_code FROM lab_results x JOIN lab_requests r ON r.id=x.request_id
-      WHERE r.patient_id=? AND x.test_id=? AND r.status<>'cancelled' AND IFNULL(x.value,'')<>'' ORDER BY r.date, r.id`, [patientId, testId]);
+      WHERE r.patient_id=? AND x.test_id=? AND r.status<>'cancelled' AND IFNULL(x.value,'') NOT IN ('','*') ORDER BY r.date, r.id`, [patientId, testId]);
   }
   function createLabWalkin(p, user) {
     return db.transaction(() => {
@@ -741,6 +741,8 @@ function makeOps(db, bus) {
       applyLabConsumption(id, user);
       const out = labFull(id);
       emit('lab:update', { id, lab_code: out.lab_code, status: out.status }, ['lab', 'admin', 'doctor'], { doctor_id: out.doctor_id });
+      // the laboratory's bill goes to the reception like a message (central cashier)
+      if (central && r2(out.net - out.paid) > 0.001) emit('lab:bill', { id, lab_code: out.lab_code, full_name: out.full_name || (out.patient || {}).full_name || '', due: r2(out.net - out.paid) }, ['reception', 'admin']);
       return out;
     });
   }
@@ -773,7 +775,7 @@ function makeOps(db, bus) {
         if (val === null) { db.run('DELETE FROM lab_results WHERE request_id=? AND test_id=?', [id, x.test_id]); continue; }
         const t = db.get('SELECT * FROM lab_tests WHERE id=?', [x.test_id]) || {};
         const numv = Number(String(val).replace(/^[<>]=?\s*/, ''));
-        if (t.numeric_only && t.result_type === 'numeric' && !isFinite(numv)) fail(`نتیجه «${t.name}» باید عدد باشد`);
+        if (t.numeric_only && t.result_type === 'numeric' && !isFinite(numv) && val !== '*') fail(`نتیجه «${t.name}» باید عدد باشد`);
         if (t.result_type === 'numeric' && isFinite(numv) && ((t.possible_low != null && numv < t.possible_low) || (t.possible_high != null && numv > t.possible_high))) fail(`نتیجه «${t.name}» (${val}) خارج از محدوده ممکن است (${t.possible_low ?? ''} – ${t.possible_high ?? ''})`);
         const kit = db.scalar('SELECT kit_id FROM lab_results WHERE request_id=? AND test_id=?', [id, x.test_id]) || t.active_kit_id || null;
         db.run(`INSERT INTO lab_results(request_id,test_id,value,flag,unit,ref,note,entered_by,kit_id) VALUES(?,?,?,?,?,?,?,?,?)
@@ -943,7 +945,7 @@ function makeOps(db, bus) {
       FROM lab_requests r LEFT JOIN doctors d ON d.id=r.doctor_id LEFT JOIN medical_departments md ON md.id=d.department_id LEFT JOIN lab_referrers rf ON rf.id=r.referrer_id
       WHERE ${w.join(' AND ')} GROUP BY k ORDER BY income DESC`, P);
     rows.forEach(r => { r.tests = db.scalar(`SELECT COUNT(*) FROM lab_request_items i JOIN lab_requests r ON r.id=i.request_id WHERE ${w.join(' AND ')} AND (CASE WHEN r.doctor_id IS NOT NULL THEN 'd' || r.doctor_id WHEN r.referrer_id IS NOT NULL THEN 'r' || r.referrer_id WHEN IFNULL(r.referrer,'')<>'' THEN 'n' || r.referrer ELSE '-' END)=?`, [...P, r.k]); });
-    const trend = db.all(`SELECT r.date, CASE WHEN r.doctor_id IS NOT NULL THEN 'd' || r.doctor_id WHEN r.referrer_id IS NOT NULL THEN 'r' || r.referrer_id WHEN IFNULL(r.referrer,'')<>'' THEN 'n' || r.referrer ELSE '-' END k, COUNT(*) c, SUM(r.subtotal) s
+    const trend = db.all(`SELECT r.date, CASE WHEN r.doctor_id IS NOT NULL THEN 'd' || r.doctor_id WHEN r.referrer_id IS NOT NULL THEN 'r' || r.referrer_id WHEN IFNULL(r.referrer,'')<>'' THEN 'n' || r.referrer ELSE '-' END k, COUNT(*) c, SUM(r.subtotal) s, SUM(r.discount) d, SUM(r.net) n
       FROM lab_requests r WHERE r.status NOT IN ('cancelled','requested') AND r.date BETWEEN ? AND ? GROUP BY r.date, k`, [f.trend_from || from, f.trend_to || to]);
     return { rows, trend };
   }
@@ -983,7 +985,7 @@ function makeOps(db, bus) {
         const r = db.get('SELECT * FROM lab_requests WHERE id=?', [id]); if (!r) fail('درخواست پیدا نشد');
         if (r.status === 'requested') out = receiveLab(id, { discount: p.discount, discount_pct: p.discount_pct, test_ids: p.test_ids, paid: amount, pay_method: method }, user, st);
         else out = payLab(id, amount, method, user, st);
-        emit('lab:paid', { id, lab_code: out.lab_code, paid: out.paid, net: out.net }, ['lab', 'admin', 'reception']);
+        emit('lab:paid', { id, lab_code: out.lab_code, paid: out.paid, net: out.net, balance: r2(out.net - out.paid), full_name: (db.get('SELECT full_name FROM patients WHERE id=?', [out.patient_id]) || {}).full_name || '' }, ['lab', 'admin', 'reception']);
       }
       else if (p.kind === 'sale') out = paySale(id, amount, method, p.note, user, st);
       else out = payAdmission(id, amount, method, p.note, user, st);
@@ -1070,7 +1072,7 @@ function makeOps(db, bus) {
       let qty = n(m.qty); if (!qty) fail('مقدار را وارد کنید');
       const kind = ['in', 'adjust', 'expired', 'use', 'return'].includes(m.kind) ? m.kind : 'adjust';
       if (['expired', 'use'].includes(kind) && qty > 0) qty = -qty;
-      db.insert('lab_item_moves', { date: isoOk(m.date) ? m.date : today(), item_id: it.id, qty, kind, unit_cost: m.unit_cost === '' || m.unit_cost == null ? it.cost : n(m.unit_cost), note: str(m.note), user_id: user.id });
+      db.insert('lab_item_moves', { date: isoOk(m.date) ? m.date : today(), item_id: it.id, qty, kind, unit_cost: m.unit_cost === '' || m.unit_cost == null ? it.cost : n(m.unit_cost), note: str(m.note), factor_no: str(m.factor_no), supplier: str(m.supplier), user_id: user.id });
       const row = { stock: r2(it.stock + qty) };
       if (kind === 'in' && m.unit_cost !== '' && m.unit_cost != null) row.cost = n(m.unit_cost);
       if (kind === 'in' && m.expiry) row.expiry = str(m.expiry);

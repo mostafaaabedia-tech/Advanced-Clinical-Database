@@ -569,7 +569,7 @@ function bmi(w, h) { w = Number(w); h = Number(h); if (!w || !h) return null; re
 // ---------------- doctor picker: dropdown grouped by department, with search, load and "new doctor" ----------------
 function doctorPickerHTML(id, { allowNone = true, placeholder = 'انتخاب داکتر…' } = {}) {
   return `<div class="drPick" id="${id}"><button type="button" class="drPickBtn"><span class="drPickVal muted">${esc(placeholder)}</span><span class="caret">▾</span></button>
-    <div class="drPickPop hidden"><input class="drPickQ" placeholder="جستجوی داکتر، بخش یا نوع کار…"><div class="drPickList"></div>
+    <div class="drPickPop hidden"><input class="drPickQ" placeholder="شماره یا نام داکتر، بخش یا نوع کار…"><div class="drPickList"></div>
     <div class="drPickFoot">${allowNone ? '<button type="button" class="btn sm ghost" data-none>بدون داکتر</button>' : ''}${isRole('reception') ? `<button type="button" class="btn sm" data-newdr>${icon('plus', 13)} داکتر جدید</button>` : ''}</div></div></div>`;
 }
 function bindDoctorPicker(root, id, { onPick, date, selected } = {}) {
@@ -585,10 +585,10 @@ function bindDoctorPicker(root, id, { onPick, date, selected } = {}) {
   };
   const draw = () => {
     const s = q.value.trim().toLowerCase();
-    const docs = App.doctors.filter(d => d.active && (!s || [d.name, d.title, d.specialty, d.department_name, d.work_type].some(x => String(x || '').toLowerCase().includes(s))));
+    const docs = App.doctors.filter(d => d.active && (!s || String(d.id) === s || String(d.code || '') === s || [d.name, d.title, d.specialty, d.department_name, d.work_type].some(x => String(x || '').toLowerCase().includes(s))));   // by number or name
     const groups = new Map(); docs.forEach(d => { const k = d.department_name || 'سایر'; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(d); });
     list.innerHTML = [...groups.entries()].map(([g, ds]) => `<div class="drPickGroup">${esc(g)}</div>${ds.map(d => { const l = load.find(x => x.id === d.id) || {}; return `<div class="drPickItem ${d.id === cur ? 'on' : ''} ${l.works_today === false ? 'off' : ''}" data-id="${d.id}">
-      <div class="grow"><b>${esc(doctorName(d))}</b><small>${esc([d.work_type, d.specialty].filter(Boolean).join(' · '))}${d.room ? ' · اطاق ' + esc(d.room) : ''}</small></div>
+      <div class="grow"><b><span class="codeTag small" title="شماره داکتر — برای جستجو">${d.id}</span> ${esc(doctorName(d))}</b><small>${esc([d.work_type, d.specialty].filter(Boolean).join(' · '))}${d.room ? ' · اطاق ' + esc(d.room) : ''}</small></div>
       <div class="drPickMeta">${l.works_today === false ? '<span class="pill bad">امروز نیست</span>' : ''}${l.max_patients ? `<span class="pill ${l.booked >= l.max_patients ? 'bad' : ''}">${l.booked}/${l.max_patients}</span>` : l.booked ? `<span class="pill">${l.booked} نوبت</span>` : ''}${l.waiting ? `<span class="pill warn">${l.waiting} منتظر</span>` : ''}<small class="muted">${money(d.visit_fee)}</small></div></div>`; }).join('')}`).join('') || '<div class="empty" style="padding:12px">داکتری پیدا نشد</div>';
   };
   const refreshLoad = async (dt) => { try { load = await API.get('/api/doctor-load', { date: dt || date || today() }); draw(); } catch (_) { } };

@@ -19,6 +19,9 @@ Pages['admin-dash'] = {
       + kpi('مصارف این ماه', money(M.expenses), { ic: 'receipt', cls: 'bad' }) + kpi('مفاد خالص این ماه', money(r2(M.ph_profit + M.lab_total + M.reception - M.expenses)), { ic: 'trend', cls: 'good', sub: 'مفاد دواخانه + لابراتوار + پذیرش − مصارف' })
       + kpi('موجودی دواخانه', money(dash.stock.cost_value), { ic: 'box', sub: `${dash.stock.low} دوا رو به اتمام · ${dash.stock.expiring} نزدیک انقضا` });
     $('#k2', view).insertAdjacentHTML('afterend', `<div class="grid g4" style="margin-top:16px">${kpi('بستر این ماه', money(M.ipd || 0), { ic: 'bed', cls: 'violet', sub: `${dash.admitted || 0} مریض همین حالا بستری` })}${kpi('بل‌های منتظر صندوق', (dash.cashier_pending?.visits || 0) + (dash.cashier_pending?.labs || 0) + (dash.cashier_pending?.sales || 0), { ic: 'cash', cls: 'warn', sub: `فیس ${dash.cashier_pending?.visits || 0} · لابراتوار ${dash.cashier_pending?.labs || 0} · دواخانه ${dash.cashier_pending?.sales || 0}` })}${kpi('کمبود مواد لابراتوار', dash.lab_items_low || 0, { ic: 'flask', cls: dash.lab_items_low ? 'bad' : 'good' })}${kpi('حالت صندوق', (App.settings.cashier_mode || 'central') === 'central' ? 'صندوق مرکزی' : 'هر بخش جدا', { ic: 'wallet', sub: 'تنظیمات ← صندوق و بخش‌ها' })}</div>`);
+    // click on a money box → every amount of that section
+    kpiDetails(view, '#k1 .kpi', ['visit', 'visit', 'sale', 'lab'], today(), today());
+    kpiDetails(view, '#k2 .kpi', ['income', 'expenses', 'income', null], currentMonthRange()[0], currentMonthRange()[1]);
     const agg = monthsAgg(days, months);
     $('#lg', view).innerHTML = legendHTML([{ label: 'پذیرش' }, { label: 'دواخانه' }, { label: 'لابراتوار' }, { label: 'بستر' }, { label: 'مصارف' }]);
     barChart($('#c1', view), agg.map(m => m.short), [{ label: 'پذیرش', data: agg.map(m => m.reception) }, { label: 'دواخانه', data: agg.map(m => m.ph_net) }, { label: 'لابراتوار', data: agg.map(m => m.lab_total) }, { label: 'بستر', data: agg.map(m => m.ipd || 0) }, { label: 'مصارف', data: agg.map(m => m.expenses), type: 'line' }], { money: true, stacked: false });
@@ -167,7 +170,7 @@ Pages.settings = {
     const s = App.settings; const po = JSON.parse(s.rx_default_print || '{}');
     const L = (k, label, rows = 6) => `<label class="field"><span>${label} <span class="hint">(هر سطر یک مورد)</span></span><textarea name="${k}" rows="${rows}">${esc(s[k] || '')}</textarea></label>`;
     view.innerHTML = `<div class="pageHead"><div><h1>تنظیمات و سرخط نسخه</h1><p>این تنظیمات برای همه ایستگاه‌ها اعمال می‌شود.</p></div><div class="toolbar"><button class="btn" data-act="preview">${icon('eye')} پیش‌نمایش نسخه</button><button class="btn primary" data-act="save">${icon('check')} ذخیره تنظیمات</button></div></div>
-      <div class="tabs" id="stT"><button class="on" data-t="clinic">کلینیک و سرخط</button><button data-t="rx">نسخه و رسید</button><button data-t="codes">کدها و نوبت</button><button data-t="stock">دواخانه و انبار</button><button data-t="lab">راپور لابراتوار</button><button data-t="cash">صندوق و بخش‌ها</button><button data-t="colors">رنگ ایستگاه‌ها</button><button data-t="lists">لیست‌ها</button><button data-t="v14">کارمندان، پیام‌ها و کیفیت</button></div>
+      <div class="tabs" id="stT"><button class="on" data-t="clinic">کلینیک و سرخط</button><button data-t="rx">نسخه و رسید</button><button data-t="codes">کدها و نوبت</button><button data-t="stock">دواخانه و انبار</button><button data-t="lab">راپور لابراتوار</button><button data-t="cash">صندوق و بخش‌ها</button><button data-t="colors">رنگ ایستگاه‌ها</button><button data-t="lists">لیست‌ها</button><button data-t="v14">کارمندان، پیام‌ها و کیفیت</button><button data-t="menus">منوها و بخش‌ها</button></div>
       <form id="stF" autocomplete="off">
       <div class="card" data-p="clinic"><div class="formGrid">
         <label class="field span2"><span>نام کلینیک</span><input name="clinic_name" value="${esc(s.clinic_name || '')}"></label><label class="field"><span>نام انگلیسی</span><input name="clinic_name_en" class="en" value="${esc(s.clinic_name_en || '')}"></label>
@@ -248,6 +251,7 @@ Pages.settings = {
         ${Object.entries(STATIONS).map(([k, st]) => `<label class="field"><span>${esc(st.name)}</span><span class="bar"><input type="color" name="color_${k}" data-def="${st.color}" value="${esc(s['color_' + k] || st.color)}"><button type="button" class="btn sm" data-reset="${k}">پیش‌فرض</button></span></label>`).join('')}</div></div>
       <datalist id="fontList">${PRINT_FONTS.map(f => `<option value="${esc(f)}">`).join('')}</datalist>
       <div class="card hidden" data-p="lists"><div class="grid g3">${L('rx_forms', 'شکل دواها')}${L('rx_doses', 'مقدار هر بار (Dose)')}${L('rx_frequencies', 'دفعات مصرف (English: 1 / day …)')}${L('rx_timings', 'زمان مصرف')}${L('rx_units', 'واحد قوت')}${L('rx_routes', 'طریقه مصرف')}${L('rx_duration_units', 'واحد مدت', 3)}${L('expense_categories', 'کتگوری مصارف')}${L('medicine_categories', 'کتگوری دواها')}${L('medicine_units', 'واحد فروش دوا')}${L('doctor_work_types', 'نوع کار داکتران')}${L('lab_units', 'واحدهای لابراتوار')}${L('lab_discount_reasons', 'دلایل تخفیف لابراتوار')}</div></div>
+      <div class="card hidden" data-p="menus">${navSettingsHTML()}</div>
       <div class="card hidden" data-p="v14"><div class="secTitle">کارمندان و حاضری</div><div class="formGrid">
         <label class="field"><span>دقیقه‌های مجاز تأخیر (ناوقت حساب نشود)</span><input name="staff_grace_min" type="number" value="${esc(s.staff_grace_min || 10)}"></label>
         <label class="check"><input type="checkbox" name="staff_late_deduct" ${s.staff_late_deduct === '1' ? 'checked' : ''}> دقیقه‌های ناوقت آمدن از معاش کم شود</label>
@@ -256,12 +260,19 @@ Pages.settings = {
         <div class="secTitle">لابراتوار: کیفیت و تأیید</div><div class="formGrid">
         <label class="field"><span>Delta check عمومی ٪</span><input name="lab_delta_pct" type="number" value="${esc(s.lab_delta_pct || 50)}"></label>
         <label class="check"><input type="checkbox" name="lab_autoverify" ${s.lab_autoverify === '1' ? 'checked' : ''}> تأیید خودکار وقتی همه نتایج نارمل است (بدون بحرانی و Delta)</label>
-        <label class="check"><input type="checkbox" name="lab_report_qr" ${s.lab_report_qr !== '0' ? 'checked' : ''}> QR تأیید اصالت روی راپور لابراتوار</label></div>
+        <label class="check"><input type="checkbox" name="lab_report_qr" ${s.lab_report_qr === '1' ? 'checked' : ''}> QR تأیید اصالت روی راپور لابراتوار</label>
+        <label class="check"><input type="checkbox" name="lab_delta_on" ${s.lab_delta_on === '1' ? 'checked' : ''}> Delta check (هشدار تغییر زیاد از جواب قبلی)</label>
+        <label class="check"><input type="checkbox" name="lab_critical_dialog" ${s.lab_critical_dialog === '1' ? 'checked' : ''}> بعد از نتیجه بحرانی، فورم «به چه کسی خبر داده شد» باز شود</label>
+        <div class="field full infoBox">این امکانات لابراتوار خاموش است تا لابراتوار مثل قبل کار کند؛ هر وقت خواستید روشن کنید. صفحه‌های QC، TAT و تأیید اصالت را هم از تب «منوها و بخش‌ها» روشن کنید.</div></div>
+        <div class="secTitle">هشدار کمبود و ورود</div><div class="formGrid">
+        <label class="field"><span>هشدار کمبود وقتی موجودی کمتر یا مساوی این عدد شد (دوا و مواد لابراتوار)</span><input name="low_stock_alert" type="number" min="0" value="${esc(s.low_stock_alert || 3)}"></label>
+        <label class="check"><input type="checkbox" name="station_lock_admin" ${s.station_lock_admin !== '0' ? 'checked' : ''}> مدیر هم فقط در برنامه مدیر وارد شود (در برنامه بخش‌های دیگر فقط کاربر همان بخش)</label></div>
         <div class="secTitle">پیام‌های یادآوری (واتس‌اپ) <span class="hint">{name} {doctor} {date} {time} {clinic} {vaccine} {code}</span></div><div class="formGrid">
         <label class="field"><span>کد کشور</span><input name="whatsapp_country" class="ltr" value="${esc(s.whatsapp_country || '93')}"></label>
         ${[['msg_reservation', 'نوبت / رزرو'], ['msg_visit', 'مراجعه بعدی'], ['msg_vaccine', 'واکسین'], ['msg_lab', 'نتیجه آزمایش'], ['msg_lapsed', 'مریضانی که نیامدند']].map(([k, l]) => `<label class="field full"><span>${l}</span><input name="${k}" value="${esc(s[k] || '')}"></label>`).join('')}</div>
         <div class="grid g2" style="margin-top:10px">${L('vaccine_schedule', 'برنامه واکسین (نام | روز بعد از تولد)', 10)}${L('peds_doses', 'دوز اطفال (نام|نام دیگر | mg/kg هر بار | دفعات در روز | حداکثر mg هر بار)', 10)}</div></div>
       </form>`;
+    bindNavSettings($('[data-p="menus"]', view));
     $('#stT', view).onclick = (e) => { const b = e.target.closest('[data-t]'); if (!b) return; $$('#stT button', view).forEach(x => x.classList.toggle('on', x === b)); $$('[data-p]', view).forEach(p => p.classList.toggle('hidden', p.dataset.p !== b.dataset.t)); };
     const collect = () => {
       const v = {}; $$('#stF [name]', view).forEach(el => v[el.name] = el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value);

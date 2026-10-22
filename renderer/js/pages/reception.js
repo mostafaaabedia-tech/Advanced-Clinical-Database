@@ -21,7 +21,7 @@ Pages.reception = {
     const docs = App.doctors.filter(d => d.active);
     view.innerHTML = `
       <div class="pageHead"><div><h1>${st.reserve ? 'وقت‌دهی (رزرو)' : 'پذیرش و نوبت‌دهی'}</h1><p>نام مریض را ثبت کنید، نوع خدمت و داکتر را انتخاب کنید، فیس را بگیرید و رسید نوبت را چاپ کنید. رسید با کد مریض به صف داکتر فرستاده می‌شود.</p></div>
-        <div class="toolbar"><button class="btn" data-act="toVisits">${icon('list')} صف امروز</button><button class="btn" data-act="toRes">${icon('calendar')} رزروها</button></div></div>
+        <div class="toolbar"><button class="btn" data-act="toVisits">${icon('list')} صف امروز</button><button class="btn" data-act="toRes">${icon('calendar')} رزروها</button><button class="btn" data-act="toLab">${icon('flask')} فرستادن به لابراتوار</button></div></div>
       <div class="recGrid">
         <div>
           <div class="card">
@@ -177,7 +177,7 @@ Pages.reception = {
     });
     actions(view, {
       newPt: () => clearPatient(), save: (b) => save(b, !!b.dataset.print),
-      toVisits: () => go('visits'), toRes: () => go('reservations')
+      toVisits: () => go('visits'), toRes: () => go('reservations'), toLab: () => referDialog(st.patient || null)
     });
     view.addEventListener('keydown', (e) => { if (e.key === 'F9') { e.preventDefault(); $('[data-act="save"][data-print]', view).click(); } });
     $('#f_name', view).focus();
@@ -237,7 +237,7 @@ Pages.visits = {
           ${v.balance > 0.001 ? `<button class="btn success" data-a="pay">${icon('money')} دریافت باقی (${money(v.balance)})</button>` : ''}
           ${v.balance < -0.001 ? `<button class="btn" data-a="refund">${icon('money')} بازپرداخت ${money(-v.balance)}</button>` : ''}
           <button class="btn" data-a="edit">${icon('edit')} ویرایش فیس / داکتر</button>
-          <button class="btn" data-a="lab">${icon('flask')} آزمایش لابراتوار</button><button class="btn" data-a="account">${icon('cash')} حساب کامل مریض</button>
+          <button class="btn" data-a="lab">${icon('flask')} فرستادن به لابراتوار</button><button class="btn" data-a="account">${icon('cash')} حساب کامل مریض</button>
           ${['waiting', 'in_visit'].includes(v.status) ? `<button class="btn" data-a="call">${icon('megaphone')} صدا زدن (TV)</button>` : ''}
           ${['waiting', 'reserved'].includes(v.status) ? `<button class="btn" data-a="noshow">نیامد</button><button class="btn dangerText" data-a="cancel">${icon('x')} لغو نوبت</button>` : ''}
         </div>` });
@@ -252,7 +252,7 @@ Pages.visits = {
           if (a === 'noshow') { await API.post('/api/visits/status/' + v.id, { status: 'no_show' }); done(); }
           if (a === 'cancel') { const r = await promptDlg('لغو نوبت', { label: 'دلیل لغو' }); if (r !== null) { await API.post('/api/visits/status/' + v.id, { status: 'cancelled', reason: r }); if (v.paid > 0 && await confirmDlg(`فیس ${money(v.paid)} پس داده شود؟`)) await API.post('/api/visits/pay/' + v.id, { amount: -v.paid, note: 'لغو نوبت' }); done(); } }
           if (a === 'edit') { m.close(); editVisit(v, load); }
-          if (a === 'lab') { m.close(); go('rc-lab', { patient_id: v.patient_id, doctor_id: v.doctor_id }); }
+          if (a === 'lab') { m.close(); referDialog({ id: v.patient_id, code: v.patient_code, full_name: v.full_name, father_name: v.father_name, sex: v.sex, birth_date: v.birth_date, phone: v.phone }, { visit_id: v.id, doctor_id: v.doctor_id }); }
           if (a === 'account') { m.close(); patientAccountDlg(v.patient_id, load); }
           if (a === 'call') { await API.post('/api/visits/call/' + v.id); toast('نوبت ' + v.turn_no + ' در صفحه نمایش اعلام شد', 'good'); done(); }
         })().catch(errToast);
@@ -335,12 +335,12 @@ Pages.patients = {
     const load = async () => {
       const r = await API.list('patients', { q: $('#p_q', view).value.trim(), limit, count: 1 });
       $('#pBody', view).innerHTML = r.rows.map(p => `<tr class="clickable" data-id="${p.id}"><td class="codeTag">${esc(p.code)}</td><td><b>${esc(p.full_name)}</b></td><td>${esc(p.father_name || '')}</td><td>${sexFa(p.sex)}</td><td>${esc(ageLabel(p.birth_date))}</td>
-        <td class="ltr">${esc(p.phone || '')}</td><td>${esc(p.address || '')}</td><td>${fmtDate(p.created_at)}</td><td class="nowrap">${isRole('reception') ? `<button class="btn sm" data-act="visit" data-id="${p.id}">${icon('ticket', 14)} نوبت</button> ` : ''}<button class="btn sm" data-act="edit" data-id="${p.id}">${icon('edit', 14)}</button> <button class="btn sm ghost" data-act="card" data-id="${p.id}" title="کارت مریض">${icon('barcode', 14)}</button></td></tr>`).join('') || emptyRow(9);
+        <td class="ltr">${esc(p.phone || '')}</td><td>${esc(p.address || '')}</td><td>${fmtDate(p.created_at)}</td><td class="nowrap">${isRole('reception') ? `<button class="btn sm" data-act="visit" data-id="${p.id}">${icon('ticket', 14)} نوبت</button> ` : ''}<button class="btn sm" data-act="edit" data-id="${p.id}">${icon('edit', 14)}</button> <button class="btn sm ghost" data-act="card" data-id="${p.id}" title="کارت مریض">${icon('barcode', 14)}</button>${isRole('reception') ? ` <button class="btn sm ghost" data-act="toLab" data-id="${p.id}" title="فرستادن به لابراتوار">${icon('flask', 14)}</button>` : ''}</td></tr>`).join('') || emptyRow(9);
       $('#pCount', view).textContent = `${r.rows.length} از ${r.total}`;
     };
     $('#p_q', view).addEventListener('input', debounce(() => { limit = 100; load(); }, 300));
     view.addEventListener('click', (e) => { const tr = e.target.closest('tr.clickable'); if (tr && !e.target.closest('button')) { const id = Number(tr.dataset.id); isRole('doctor') ? openPatientFile(id) : openPatientBasic(id); } });
-    actions(view, { more: () => { limit += 200; load(); }, new: () => editPatient(null, load), edit: async (b) => editPatient(await API.one('patients', b.dataset.id), load), visit: (b) => go('reception', { patient_id: Number(b.dataset.id) }), card: async (b) => printPatientCard(await API.get('/api/patient-basic/' + b.dataset.id)) });
+    actions(view, { more: () => { limit += 200; load(); }, new: () => editPatient(null, load), edit: async (b) => editPatient(await API.one('patients', b.dataset.id), load), visit: (b) => go('reception', { patient_id: Number(b.dataset.id) }), card: async (b) => printPatientCard(await API.get('/api/patient-basic/' + b.dataset.id)), toLab: async (b) => referDialog(await API.get('/api/patient-basic/' + b.dataset.id)) });
     await load();
   }
 };

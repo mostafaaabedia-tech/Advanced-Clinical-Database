@@ -3,7 +3,8 @@
 # pharmacy & stock tools (expiry, controlled register, ABC-VED, stock count, department request, purchase order, supplier return),
 # lab quality (QC + Westgard, TAT, report verification), comparison report and the new animated look.
 # Usage: python3 scripts/ui_flow5.py http://localhost:8770 out_dir
-import sys, os, json, base64
+import sys, os, json, base64, random
+C1, C2 = str(random.randint(1000, 4999)), str(random.randint(5000, 9999))   # fresh staff codes on every run
 from playwright.sync_api import sync_playwright
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:8770'
@@ -47,17 +48,17 @@ with sync_playwright() as p:
   nav = rc.evaluate("[...document.querySelectorAll('#sidebar .navItem')].map(x => x.dataset.page)")
   ok(all(x in nav for x in ['staff', 'attendance', 'payroll', 'reminders']), 'reception menu has staff / attendance / payroll / reminders')
   rc.evaluate("go('staff')"); rc.wait_for_timeout(900)
-  for name, sal, code in [('احمد کریمی', 12000, '11'), ('مریم نوری', 9000, '12')]:
+  for name, sal, code in [('احمد کریمی', 12000, C1), ('مریم نوری', 9000, C2)]:
     rc.click('[data-act=new]'); rc.wait_for_timeout(300)
     rc.evaluate(f"document.querySelector('#sfF [name=name]').value = '{name}'")
     rc.fill('#sfF [name=code]', code); rc.fill('#sfF [name=position]', 'نرس'); rc.fill('#sfF [name=salary]', str(sal))
     rc.fill('#sfF [name=work_start]', '08:00'); rc.fill('#sfF [name=work_end]', '16:00')
-    if code == '11': shot(rc, 'f5-01-staff-form')
+    if code == C1: shot(rc, 'f5-01-staff-form')
     rc.click('#sf_ok'); rc.wait_for_timeout(700)
   n = rc.evaluate("document.querySelectorAll('#stB tr').length"); ok(n >= 2, f'staff listed ({n})')
   shot(rc, 'f5-02-staff-list')
-  sid = api(rc, "const l = await API.get('/api/staff'); return l.find(s => s.code === '11').id")
-  sid2 = api(rc, "const l = await API.get('/api/staff'); return l.find(s => s.code === '12').id")
+  sid = api(rc, "const l = await API.get('/api/staff'); return l.find(s => s.code === '" + C1 + "').id")
+  sid2 = api(rc, "const l = await API.get('/api/staff'); return l.find(s => s.code === '" + C2 + "').id")
   # advance from the salary (taken from the reception cash)
   rc.click(f'[data-act=adv][data-id="{sid}"]'); rc.wait_for_timeout(300); rc.fill('#adF [name=amount]', '2000'); rc.fill('#adF [name=note]', 'ضرورت شخصی'); shot(rc, 'f5-03-advance'); rc.click('#ad_ok'); rc.wait_for_timeout(800)
   wd = api(rc, "const l = await API.list('withdrawals', { limit: 50 }); return l.filter(w => w.kind === 'salary').length")
@@ -71,7 +72,7 @@ with sync_playwright() as p:
   att = api(rc, f"const d = await API.get('/api/staff/day'); const r = d.find(x => x.id === {sid}); return [r.att && r.att.status, r.leaves.length && r.leaves[0].minutes]")
   ok(att[0] == 'present' and att[1] == 90, f'checked in and hourly leave of 90 minutes recorded ({att})')
   # device import (CSV)
-  api(rc, f"const d = new Date(); d.setDate(d.getDate() - 1); const y = d.toISOString().slice(0, 10); return API.post('/api/staff/import-attendance', {{ text: '11,' + y + ' 08:25\\n11,' + y + ' 16:02\\n12,' + y + ' 07:55\\nXX,' + y + ' 09:00' }})")
+  api(rc, f"const d = new Date(); d.setDate(d.getDate() - 1); const y = d.toISOString().slice(0, 10); return API.post('/api/staff/import-attendance', {{ text: '{C1},' + y + ' 08:25\\n{C1},' + y + ' 16:02\\n{C2},' + y + ' 07:55\\nXX,' + y + ' 09:00' }})")
   rc.click('#atT [data-t=month]'); rc.wait_for_timeout(900); shot(rc, 'f5-06-attendance-month')
   ok('ناوقت' in rc.evaluate("document.querySelector('#amOut').innerText") or True, 'monthly attendance report')
   rc.click('#atT [data-t=leaves]'); rc.wait_for_timeout(700)
@@ -121,6 +122,8 @@ with sync_playwright() as p:
 
   # ---------------- admin: staff group in the menu, users no-finance, settings
   ctx, ad = station(b, 'admin', 'admin', '1234')
+  # v1.5: the lab extras (QC, TAT, verify, requests) are switched off by default — switch them on for this test
+  ad.evaluate("(async()=>{ await API.post('/api/settings', { nav_config: JSON.stringify({ lab: { hidden: [], order: [] }, admin: { hidden: [], order: [] } }), lab_report_qr: '1' }); })()"); ad.wait_for_timeout(500)
   ok(ad.evaluate("[...document.querySelectorAll('#sidebar .navGroup')].some(g => g.textContent.includes('کارمندان'))"), 'admin menu has a staff group')
   ad.evaluate("go('payroll')"); ad.wait_for_timeout(1000); ok(ad.evaluate("document.querySelectorAll('#pyT tbody tr').length") >= 2, 'admin sees the payroll')
   ad.evaluate("go('settings')"); ad.wait_for_timeout(900); ad.click('#stT [data-t=v14]'); ad.wait_for_timeout(300); shot(ad, 'f5-14-settings-v14', True)
@@ -193,6 +196,9 @@ with sync_playwright() as p:
 
   ctx, sk = station(b, 'stock', 'stock', '1111')
   sk.evaluate("go('dept-requests')"); sk.wait_for_timeout(900); shot(sk, 'f5-29-dept-requests')
+  ctx.close()
+  ctx, ad = station(b, 'admin', 'admin', '1234')
+  ad.evaluate("(async()=>{ await API.post('/api/settings', { nav_config: '', lab_report_qr: '0' }); })()"); ad.wait_for_timeout(500)
   ctx.close()
   b.close()
 print('\n'.join(checks))

@@ -11,6 +11,7 @@ const { ClinicDatabase } = require('./db');
 const { makeOps } = require('./ops');
 const { makeResources, allowed } = require('./resources');
 const { registerExtra } = require('./extra');
+const { registerV15 } = require('./v15');
 
 const APP_ID = 'ACDB';
 const DISCOVERY_PORT = 41234;
@@ -136,7 +137,8 @@ async function createServer(opts = {}) {
     const u = db.login(body.username, body.password);
     if (!u) throw new UserError('نام کاربری یا رمز عبور نادرست است');
     const station = ROLES.includes(body.station) ? body.station : null;
-    if (station && db.getSetting('station_lock', '1') === '1' && u.role !== 'admin' && u.role !== station) {
+    // a station program opens only for the users of its own section (the admin too, unless allowed in Settings)
+    if (station && db.getSetting('station_lock', '1') === '1' && u.role !== station && (u.role !== 'admin' || db.getSetting('station_lock_admin', '1') === '1')) {
       const names = { admin: 'مدیر', stock: 'انبار و حسابات', reception: 'پذیرش', doctor: 'داکتر', pharmacy: 'دواخانه', lab: 'لابراتوار' };
       throw new UserError(`این کاربر مربوط به بخش «${names[u.role]}» است و در این کمپیوتر (${names[station]}) اجازه ورود ندارد.`);
     }
@@ -284,6 +286,24 @@ async function createServer(opts = {}) {
   route('POST', '/api/lab/receive/:id', ({ user, body, params, req }) => { need(user, 'lab', 'reception'); const r = ops.receiveLab(Number(params.id), body, user); audit(user, 'receive', 'lab_request', r.id, `${r.lab_code} ${r.net}`, req); return r; });
   route('POST', '/api/lab/pay/:id', ({ user, body, params, req }) => { need(user, 'lab', 'reception'); const r = ops.payLab(Number(params.id), body.amount, body.method, user); audit(user, 'pay', 'lab_request', r.id, String(body.amount), req); return r; });
   route('POST', '/api/lab/results/:id', ({ user, body, params, req }) => { need(user, 'lab'); const r = ops.saveLabResults(Number(params.id), body, user); audit(user, 'results', 'lab_request', r.id, body.status || '', req); return r; });
+  // delete a registration that has no payment and no results (wrong entry)
+  route('POST', '/api/lab/delete/:id', ({ user, params, req }) => {
+    need(user, 'lab');
+    const r = db.get('SELECT * FROM lab_requests WHERE id=?', [params.id]); if (!r) throw new UserError('درخواست پیدا نشد');
+    if (r.paid > 0) throw new UserError('این پذیرش پرداخت دارد؛ اول پول را مسترد کنید');
+    if (db.scalar("SELECT COUNT(*) FROM lab_results WHERE request_id=? AND IFNULL(value,'')<>''", [r.id])) throw new UserError('این پذیرش نتیجه دارد و حذف نمی‌شود (لغو کنید)');
+    db.transaction(() => {
+      // give back the materials taken by this registration
+      for (const m of db.all("SELECT item_id, SUM(qty) q FROM lab_item_moves WHERE ref_type='lab_request' AND ref_id=? GROUP BY item_id", [r.id])) db.run('UPDATE lab_items SET stock = stock - ? WHERE id=?', [m.q, m.item_id]);
+      db.run("DELETE FROM lab_item_moves WHERE ref_type='lab_request' AND ref_id=?", [r.id]);
+      db.run('DELETE FROM lab_results WHERE request_id=?', [r.id]); db.run('DELETE FROM lab_request_items WHERE request_id=?', [r.id]);
+      db.run('UPDATE lab_referrals SET lab_request_id=NULL, status=\'open\' WHERE lab_request_id=?', [r.id]);
+      db.run('DELETE FROM lab_requests WHERE id=?', [r.id]);
+    });
+    audit(user, 'delete', 'lab_request', r.id, r.lab_code, req);
+    bus.emit({ type: 'lab:update', data: { id: r.id, status: 'deleted' }, roles: ['lab', 'admin', 'reception'] });
+    return true;
+  });
   route('POST', '/api/lab/cancel/:id', ({ user, body, params, req }) => {
     need(user, 'lab', 'reception');
     const r = db.get('SELECT * FROM lab_requests WHERE id=?', [params.id]); if (!r) throw new UserError('درخواست پیدا نشد');
@@ -330,8 +350,11 @@ async function createServer(opts = {}) {
   });
   route('GET', '/api/lab/items-usage', ({ user, query }) => {
     need(user, 'lab', 'stock');
-    return db.all(`SELECT li.id, li.name, li.unit, li.stock, li.cost, IFNULL(SUM(CASE WHEN m.qty<0 THEN -m.qty ELSE 0 END),0) used, IFNULL(SUM(CASE WHEN m.qty>0 AND m.kind='in' THEN m.qty ELSE 0 END),0) received
-      FROM lab_items li LEFT JOIN lab_item_moves m ON m.item_id=li.id AND m.date BETWEEN ? AND ? GROUP BY li.id ORDER BY used DESC`, [query.from || '0000', query.to || '9999']);
+    // start of the period, bought, used and end of the period (stock now minus everything after the period)
+    return db.all(`SELECT li.id, li.name, li.unit, li.stock, li.cost, li.reorder_level, IFNULL(SUM(CASE WHEN m.qty<0 THEN -m.qty ELSE 0 END),0) used, IFNULL(SUM(CASE WHEN m.qty>0 AND m.kind='in' THEN m.qty ELSE 0 END),0) received,
+      li.stock - IFNULL((SELECT SUM(a.qty) FROM lab_item_moves a WHERE a.item_id=li.id AND a.date > ?),0) end_stock,
+      li.stock - IFNULL((SELECT SUM(a.qty) FROM lab_item_moves a WHERE a.item_id=li.id AND a.date >= ?),0) start_stock
+      FROM lab_items li LEFT JOIN lab_item_moves m ON m.item_id=li.id AND m.date BETWEEN ? AND ? GROUP BY li.id ORDER BY used DESC`, [query.to || '9999', query.from || '0000', query.from || '0000', query.to || '9999']);
   });
 
   // in-patients (beds)
@@ -384,6 +407,7 @@ async function createServer(opts = {}) {
   });
 
   const extra = registerExtra({ route, need, db, ops, audit, bus, dataDir, ROLES, UserError });
+  registerV15({ route, need, db, ops, audit, bus, ROLES, UserError });
 
   // ---------------- HTTP server ----------------
   async function handle(req, res) {

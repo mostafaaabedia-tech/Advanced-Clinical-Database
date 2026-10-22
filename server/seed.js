@@ -72,7 +72,9 @@ const DEFAULT_SETTINGS = {
     'Cefixime | 8 | 1 | 400', 'Cephalexin|Cefalexin | 12.5 | 4 | 1000', 'Cefuroxime | 15 | 2 | 500', 'Metronidazole | 7.5 | 3 | 500', 'Cotrimoxazole|Co-trimoxazole | 4 | 2 | 160',
     'Erythromycin | 12.5 | 4 | 500', 'Clarithromycin | 7.5 | 2 | 500', 'Salbutamol | 0.1 | 3 | 2'),
   staff_grace_min: '10', staff_late_deduct: '0', staff_hourly_paid: '0',
-  lab_delta_pct: '50', lab_autoverify: '0', lab_report_qr: '1', restrict_finance: '0',
+  lab_delta_pct: '50', lab_autoverify: '0', lab_report_qr: '0', restrict_finance: '0',
+  // v1.5
+  lab_delta_on: '0', lab_critical_dialog: '0', low_stock_alert: '3', station_lock_admin: '1', nav_config: '', page_layout: '',
   expense_categories: LIST('معاش کارمندان', 'بل برق', 'انترنت / وایفای', 'کرایه', 'قرطاسیه', 'نظافت', 'مواد سونوگرافی', 'مواد مصرفی', 'ترانسپورت', 'ترمیمات', 'شخصی', 'برگشتی', 'سایر'),
   medicine_categories: LIST('انتی بیوتیک', 'مسکن و ضد التهاب', 'ویتامین و مکمل', 'گوارشی', 'تنفسی و حساسیت', 'قلبی و فشار خون', 'دیابت', 'زنانه و ولادی', 'اطفال', 'سیروم و پیچکاری', 'پوستی', 'چشم و گوش', 'عصبی', 'سایر'),
   medicine_units: LIST('عدد', 'تابلیت', 'کپسول', 'بوتل', 'ورق', 'قطی', 'امپول', 'ویال', 'تیوب', 'ساشه', 'بسته'),
@@ -212,6 +214,16 @@ function ensureDefaults(db) {
     if (db.getSetting('ui_v14', '0') !== '1') {
       db.db.run("INSERT OR REPLACE INTO settings(key,value) VALUES('ui_mode','simple')");
       db.db.run("INSERT OR REPLACE INTO settings(key,value) VALUES('ui_v14','1')");
+    }
+    // urine routine: microscopic findings print beside the physical / chemical part (side by side), not under it
+    if (db.getSetting('urine_side_seeded', '0') !== '1') {
+      db.db.run("UPDATE lab_tests SET side_column=1 WHERE IFNULL(side_column,0)=0 AND code IN ('URBC','UWBC','UEPI','UCAST','UCRY','UBAC','UYST','UTRI','UMUC','UOTH')");
+      db.db.run("INSERT OR REPLACE INTO settings(key,value) VALUES('urine_side_seeded','1')");
+    }
+    // v1.5: the laboratory works like before; the v1.4 lab extras stay available but switched off (Settings → staff, messages & quality)
+    if (db.getSetting('lab_v15', '0') !== '1') {
+      for (const [k, v] of [['lab_report_qr', '0'], ['lab_autoverify', '0'], ['lab_delta_on', '0'], ['lab_critical_dialog', '0'], ['station_lock', '1'], ['station_lock_admin', '1']]) db.db.run('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)', [k, v]);
+      db.db.run("INSERT OR REPLACE INTO settings(key,value) VALUES('lab_v15','1')");
     }
     // differential counts print in the side column of the CBC (like the lab's previous report)
     if (db.getSetting('lab_side_seeded', '0') !== '1') {

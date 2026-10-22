@@ -394,11 +394,12 @@ Pages.expenses = {
 };
 
 // ================================================================ withdrawals (all sections for the stock / accounts station; own sections for pharmacy and reception)
-function withdrawalsPage(title, sub) {
+function withdrawalsPage(title, sub, { all = false } = {}) {
   return {
     async render(view) {
       const [mf, mt] = currentMonthRange();
-      const secs = wdSectionsFor();
+      const mine = wdSectionsFor();                                   // sections this station may add / change
+      const secs = all ? ['pharmacy', 'lab', 'reception'] : mine;    // sections shown
       view.innerHTML = `<div class="pageHead"><div><h1>${title}</h1><p>${sub}</p></div><div class="toolbar"><button class="btn primary" data-act="new">${icon('plus')} برداشت جدید</button><button class="btn" data-act="print">${icon('print')} چاپ</button><button class="btn" data-act="csv">${icon('download')} CSV</button></div></div>
         <div class="filterBar"><label class="field"><span>از</span>${dateInput('from', mf, 'id="w_from"')}</label><label class="field"><span>تا</span>${dateInput('to', mt, 'id="w_to"')}</label>
           ${secs.length > 1 ? `<label class="field"><span>بخش</span><select id="w_sec">${opt(secs.map(x => [x, SECTIONS[x]]), '', { empty: 'همه' })}</select></label>` : ''}
@@ -416,7 +417,7 @@ function withdrawalsPage(title, sub) {
         if (qq) rows = rows.filter(w => [w.person, w.factor_no, w.note, w.by_whom].some(v => String(v || '').toLowerCase().includes(qq)));
         $('#wB', view).innerHTML = rows.map(w => `<tr><td class="nowrap">${fmtDate(w.date)} <small class="muted">${weekday(w.date)}</small></td><td>${esc(SECTIONS[w.section] || w.section)}</td><td>${w.kind === 'personal' ? pill(wdKindName(w.section, w.kind), 'warn') : w.kind === 'factor' ? pill(wdKindName(w.section, w.kind), 'info') : esc(wdKindName(w.section, w.kind))}</td>
           <td>${esc(w.person || '')}${w.factor_no ? ` <span class="codeTag small">${esc(w.factor_no)}</span>` : ''}</td><td class="money">${money(w.amount)}</td><td>${esc(w.by_whom || '')}</td><td class="small">${esc(w.note || '')}</td>
-          <td class="nowrap"><button class="btn sm" data-act="edit" data-id="${w.id}">${icon('edit', 14)}</button> <button class="btn sm dangerText" data-act="del" data-id="${w.id}">${icon('trash', 14)}</button></td></tr>`).join('') || emptyRow(8);
+          <td class="nowrap">${mine.includes(w.section) ? `<button class="btn sm" data-act="edit" data-id="${w.id}">${icon('edit', 14)}</button> <button class="btn sm dangerText" data-act="del" data-id="${w.id}">${icon('trash', 14)}</button>` : ''}</td></tr>`).join('') || emptyRow(8);
         $('#wF', view).innerHTML = `<tr><td colspan="4">مجموع (${rows.length})</td><td>${money(sumBy(rows, 'amount'))}</td><td colspan="3"></td></tr>`;
         // totals of every section and type
         const groups = [];
@@ -426,7 +427,7 @@ function withdrawalsPage(title, sub) {
       $$('#w_from, #w_to, #w_sec, #w_kind', view).forEach(el => el && el.addEventListener('change', load));
       $('#w_q', view).addEventListener('input', debounce(load, 250));
       actions(view, {
-        new: () => withdrawalDialog(secs[0], load),
+        new: () => withdrawalDialog(mine[0], load),
         edit: (b) => withdrawalDialog(null, load, rows.find(r => r.id === Number(b.dataset.id))),
         del: async (b) => { if (await confirmDlg('این برداشت حذف شود؟ (اگر پرداخت فاکتور باشد، از فاکتور هم حذف می‌شود)', { danger: true })) { await API.del('withdrawals', b.dataset.id); load(); } },
         print: () => previewDoc(reportDocHTML(title, `<table class="rt">${$('#wT', view).innerHTML.replace(/<button[\s\S]*?<\/button>/g, '')}</table>`, `${fmtDate(dateOf($('#w_from', view)))} — ${fmtDate(dateOf($('#w_to', view)))}`), { title }),
@@ -438,6 +439,7 @@ function withdrawalsPage(title, sub) {
 }
 Pages.withdrawals = withdrawalsPage('برداشت‌ها', 'پول برداشته شده از صندوق دواخانه، لابراتوار و پذیرش — به تفکیک نوع: شخصی، پرداخت فاکتور، معاینات بیرونی، برای شخص و سایر.');
 Pages['ph-wd'] = withdrawalsPage('برداشت‌های دواخانه', 'جدا از حسابات فروش: برداشت شخصی، پرداخت فاکتور کمپنی، برای شخص (معاش، قرض) و سایر.');
+Pages['all-wd'] = withdrawalsPage('برداشت‌های همه بخش‌ها', 'همه برداشت‌های کلینیک در یک جا: دواخانه، لابراتوار و پذیرش — به تفکیک بخش و نوع.', { all: true });
 Pages['rc-wd'] = withdrawalsPage('برداشت‌های لابراتوار و پذیرش', 'برداشت از پول لابراتوار: شخصی یا معاینات بیرونی (آزمایش ارسالی) — و برداشت از صندوق پذیرش.');
 
 // ================================================================ monthly account like the Excel book «حسابات ماهوار»:

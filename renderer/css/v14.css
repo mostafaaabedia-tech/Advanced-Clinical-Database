@@ -101,11 +101,11 @@ tr.totRow td { font-weight: 700; background: var(--brand-soft) !important; }
 @keyframes v14Shine { from { background-position: -200% 0; } to { background-position: 200% 0; } }
 
 /* new look: pages slide in, cards follow one after another */
-html[data-ui="simple"] #view > * { animation: v14In .32s cubic-bezier(.2,.8,.2,1) both; }
-html[data-ui="simple"] #view > *:nth-child(2) { animation-delay: .04s; }
-html[data-ui="simple"] #view > *:nth-child(3) { animation-delay: .08s; }
-html[data-ui="simple"] #view > *:nth-child(4) { animation-delay: .12s; }
-html[data-ui="simple"] #view > *:nth-child(n+5) { animation-delay: .16s; }
+html[data-ui="simple"] #view > * { animation: v14In .2s cubic-bezier(.2,.8,.2,1) both; }
+html[data-ui="simple"] #view > *:nth-child(2) { animation-delay: .02s; }
+html[data-ui="simple"] #view > *:nth-child(3) { animation-delay: .04s; }
+html[data-ui="simple"] #view > *:nth-child(4) { animation-delay: .06s; }
+html[data-ui="simple"] #view > *:nth-child(n+5) { animation-delay: .08s; }
 html[data-ui="simple"] .grid > .kpi { animation: v14Pop .36s cubic-bezier(.2,.8,.2,1) both; }
 html[data-ui="simple"] .grid > .kpi:nth-child(2) { animation-delay: .05s; } html[data-ui="simple"] .grid > .kpi:nth-child(3) { animation-delay: .1s; }
 html[data-ui="simple"] .grid > .kpi:nth-child(4) { animation-delay: .15s; } html[data-ui="simple"] .grid > .kpi:nth-child(5) { animation-delay: .2s; }

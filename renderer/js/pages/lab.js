@@ -87,10 +87,13 @@ Pages['lab-inbox'] = {
     let tab = params.tab || 'requested';
     view.innerHTML = `<div class="pageHead"><div><h1>درخواست‌های آزمایش</h1><p>درخواست‌های داکتران با کد لابراتوار به‌صورت زنده می‌رسد. کد را از رسید/نسخه مریض وارد کنید یا روی درخواست کلیک کنید.</p></div>
       <div class="toolbar"><div class="codeEntry"><input id="lbCode" placeholder="کد لابراتوار (مثلاً 45 یا LB-00045)" style="font-size:16px;width:260px"><button class="btn primary" data-act="open">${icon('search')} باز کردن</button></div><button class="btn" data-act="walk">${icon('plus')} مریض بیرونی</button></div></div>
-      <div class="tabs" id="lTabs"><button data-t="requested">جدید (منتظر پذیرش)</button><button data-t="received">در حال انجام</button><button data-t="completed">منتظر تأیید</button><button data-t="approved">تأیید شده امروز</button></div>
+      <div id="lLow"></div><div class="tabs" id="lTabs"><button data-t="ref">${icon('ticket', 14)} از پذیرش <span class="cnt" id="lRefN"></span></button><button data-t="requested">جدید (منتظر پذیرش)</button><button data-t="received">در حال انجام</button><button data-t="completed">منتظر تأیید</button><button data-t="approved">تأیید شده امروز</button></div>
       <div class="inbox" id="lb"></div>`;
     const load = async () => {
       $$('#lTabs button', view).forEach(b => b.classList.toggle('on', b.dataset.t === tab));
+      const refs = await labReferralsHTML(); $('#lRefN', view).textContent = refs.n || '';
+      labLowBanner(view).catch(() => { });
+      if (tab === 'ref') { $('#lb', view).innerHTML = refs.html; return; }
       const q = tab === 'approved' ? { 'in.status': 'approved,delivered', 'ge.approved_at': today(), limit: 300 } : { 'eq.status': tab, order: 'id', limit: 300 };
       const rows = await API.list('lab_requests', q);
       $('#lb', view).innerHTML = rows.map(r => `<div class="rxCard ${r.status === 'requested' ? 'new' : ''}" data-id="${r.id}" style="cursor:pointer">
@@ -100,7 +103,12 @@ Pages['lab-inbox'] = {
         ${r.urgent ? pill('عاجل', 'bad') : ''}${statusPill(LAB_STATUS, r.status)}<b class="money">${money(r.net || r.subtotal)}</b></div>`).join('') || '<div class="card empty">موردی وجود ندارد ✓</div>';
     };
     $('#lTabs', view).onclick = (e) => { const b = e.target.closest('[data-t]'); if (b) { tab = b.dataset.t; load(); } };
-    view.addEventListener('click', (e) => { const c = e.target.closest('.rxCard'); if (c) openLabWork(Number(c.dataset.id)); });
+    view.addEventListener('click', async (e) => {
+      const g = e.target.closest('[data-refgo]'), x = e.target.closest('[data-refx]');
+      if (g) return go('lab-walkin', { patient_id: Number(g.dataset.pid), doctor_id: Number(g.dataset.did) || undefined, referral_id: Number(g.dataset.refgo) });
+      if (x) { if (await confirmDlg('این مریض از لیست برداشته شود؟')) { await API.post('/api/lab/referral-cancel/' + x.dataset.refx).catch(errToast); load(); } return; }
+      const c = e.target.closest('.rxCard[data-id]'); if (c) openLabWork(Number(c.dataset.id));
+    });
     const openCode = async () => { const c = $('#lbCode', view).value.trim(); if (!c) return; const r = await API.get('/api/lab/req/' + encodeURIComponent(c)); openLabWork(r.id); };
     $('#lbCode', view).addEventListener('keydown', (e) => { if (e.key === 'Enter') openCode().catch(errToast); });
     actions(view, { open: openCode, walk: () => go('lab-walkin') });
@@ -109,6 +117,8 @@ Pages['lab-inbox'] = {
   onEvent(m) { if (m.type.startsWith('lab') && this._load) this._load(); }
 };
 function openLabWork(id) { go('lab-work', { id }); }
+// answers of an option test with their codes: "32=Yellow" keeps code 32, a plain answer gets its place number
+function labOptList(t) { let a = []; try { a = JSON.parse(t.options || '[]'); } catch (_) { } return a.map((x, i) => { const m = String(x).match(/^\s*(\d+)\s*=\s*(.+)$/); return m ? { code: m[1], label: m[2].trim() } : { code: String(i + 1), label: String(x).trim() }; }); }
 
 // ================================================================ work on one request: bill → results → approve
 Pages['lab-work'] = {
@@ -186,7 +196,8 @@ Pages['lab-work'] = {
       const input = (t) => {
         const v = res.get(t.id)?.value ?? '';
         if (t.formula) return `<input data-tid="${t.id}" class="calc" value="${esc(v)}" readonly title="محاسبه خودکار">`;
-        if (t.result_type === 'option') { const o = JSON.parse(t.options || '[]').map(x => String(x).replace(/^\s*\d+\s*=\s*/, '')); return `<select data-tid="${t.id}" class="optSel" ${locked ? 'disabled' : ''}><option value=""></option>${o.map(x => `<option ${x === v ? 'selected' : ''}>${esc(x)}</option>`).join('')}${v && !o.includes(v) ? `<option selected>${esc(v)}</option>` : ''}</select>`; }
+        // option results: type the code of the answer (e.g. 32 = Yellow) or the text; the list shows every answer with its code
+        if (t.result_type === 'option') { const o = labOptList(t); return `<input data-tid="${t.id}" class="optIn" data-optcodes="${esc(JSON.stringify(o))}" value="${esc(v)}" list="op_${t.id}" autocomplete="off" placeholder="کد یا متن جواب" ${locked ? 'readonly' : ''}><datalist id="op_${t.id}">${o.map(x => `<option value="${esc(x.label)}" label="${esc(x.code)}">`).join('')}</datalist>`; }
         const ra = (() => { try { return JSON.parse(t.ready_answers || '[]'); } catch (_) { return []; } })();
         if (t.result_type === 'memo') return `<textarea data-tid="${t.id}" rows="2" style="direction:ltr" ${locked ? 'readonly' : ''}>${esc(v)}</textarea>`;
         return `<input data-tid="${t.id}" value="${esc(v)}" ${locked ? 'readonly' : ''} autocomplete="off" ${ra.length ? `list="ra_${t.id}"` : ''} ${t.numeric_only ? 'inputmode="decimal"' : ''}>${ra.length ? `<datalist id="ra_${t.id}">${ra.map(x => `<option value="${esc(x)}">`).join('')}</datalist>` : ''}`;
@@ -203,7 +214,7 @@ Pages['lab-work'] = {
         <div class="sum labInfo" style="margin-bottom:10px">${r.reception ? `<span>نوع پذیرش: <b>${esc(r.reception.name)}</b></span>` : ''}${fl ? `<span><b>${fl}</b></span>` : ''}${r.urgent ? pill('عاجل', 'bad') : ''}${r.pregnant ? pill('حامله', 'violet') : ''}${sf && r.sample_flag ? pill(sf, 'warn') : ''}
           ${r.answer_date ? `<span>تاریخ جوابدهی: <b>${fmtDate(r.answer_date)}</b></span>` : ''}${r.clinical_notes ? `<span>Clinical notes: <b class="en">${esc(r.clinical_notes)}</b></span>` : ''}
           <span>پذیرش: <b>${esc(r.received_by_name || r.created_by_name || '—')}</b></span>${r.checked_by_name ? `<span>Checked by: <b>${esc(r.checked_by_name)}</b></span>` : ''}${r.approved_by_name ? `<span>تأیید: <b>${esc(r.approved_by_name)}</b></span>` : ''}${r.print_count ? `<span>چاپ: <b>${r.print_count}</b></span>` : ''}</div>
-        <div class="bar" style="margin-bottom:10px;flex-wrap:wrap">${r.sampled_at ? pill('نمونه گرفته شد · ' + fmtTime(r.sampled_at), 'good') : `<button class="btn sm" data-act="sample">${icon('check', 13)} نمونه گرفته شد</button>`}<button class="btn sm" data-act="labels">${icon('barcode', 13)} چاپ لیبل تیوب‌ها</button>${locked ? '' : `<button class="btn sm" data-act="defaults">${icon('check', 13)} جواب‌های پیش‌فرض</button>`}
+        <div class="bar" style="margin-bottom:10px;flex-wrap:wrap">${r.sampled_at ? pill('نمونه گرفته شد · ' + fmtTime(r.sampled_at), 'good') : `<button class="btn sm" data-act="sample">${icon('check', 13)} نمونه گرفته شد</button>`}<button class="btn sm" data-act="labels">${icon('barcode', 13)} چاپ لیبل تیوب‌ها</button>${locked ? '' : `<button class="btn sm" data-act="defaults">${icon('check', 13)} جواب‌های پیش‌فرض</button><button class="btn sm" data-act="starAll" title="همه خانه‌های خالی ستاره (*) می‌شوند؛ آزمایش ستاره‌دار در راپور نمی‌آید. بعد فقط نتایج لازم را بنویسید">✱ ستاره همه</button><button class="btn sm ghost" data-act="unstar" title="ستاره‌ها پاک شود">پاک کردن ستاره‌ها</button>`}
           <span class="grow"></span>${r.prev_id ? `<button class="btn sm" data-nav="${r.prev_id}" title="پذیرش قبلی">${icon('arrow', 13)} قبلی</button>` : ''}${r.next_id ? `<button class="btn sm" data-nav="${r.next_id}" title="پذیرش بعدی">بعدی ←</button>` : ''}</div>
         ${plist.length > 1 ? `<div class="deptTabs" id="dTabs">${plist.map((p, i) => `<button type="button" data-pg="${i}" class="${i === cur ? 'on' : ''}">${esc(p.name)}<span class="cnt" data-cnt="${i}"></span></button>`).join('')}<button type="button" data-pg="all">همه</button></div>` : ''}
         ${plist.map((p, i) => `<div class="deptPage ${i === cur || plist.length === 1 ? 'on' : ''}" data-page="${i}">${[...p.groups.entries()].map(([g, list]) => `<div class="resGroup"><div class="resGroupHead"><span>${esc(g)}</span><small class="muted">${esc(list[0]?.sample || '')}</small></div>
@@ -212,7 +223,7 @@ Pages['lab-work'] = {
         <label class="field"><span>یادداشت راپور (Comment)</span><textarea id="repNote" rows="2" style="direction:ltr" ${locked ? 'readonly' : ''}>${esc(r.report_note || '')}</textarea></label>
         <div class="stickyFoot">
           ${locked ? `<button class="btn" data-act="reopen">${icon('edit')} باز کردن برای اصلاح</button>` : `<button class="btn" data-act="saveRes" data-st="">${icon('check')} ذخیره</button><button class="btn" data-act="saveRes" data-st="completed">${icon('check')} تکمیل نتایج</button><button class="btn success lg" data-act="saveRes" data-st="approved">${icon('send')} تأیید نهایی و ارسال به داکتر</button>`}
-          <button class="btn primary" data-act="report">${icon('print')} چاپ راپور</button><button class="btn" data-act="receipt">${icon('receipt')} رسیدها</button>
+          <button class="btn primary" data-act="report">${icon('print')} چاپ راپور</button><button class="btn" data-act="receipt">${icon('receipt')} رسیدها</button>${['completed', 'approved', 'delivered'].includes(r.status) ? `<button class="btn" data-act="share" title="فرستادن نتایج به داکتر یا مریض">${icon('send')} واتس‌اپ / تلگرام</button>` : ''}
           ${r.net - r.paid > 0.001 && !central ? `<button class="btn success" data-act="pay">${icon('money')} دریافت باقی ${money(r.net - r.paid)}</button>` : ''}${r.net - r.paid > 0.001 && central ? `<span class="pill warn">باقی ${money(r.net - r.paid)} — صندوق پذیرش</span>` : ''}
           ${r.status === 'approved' ? `<button class="btn" data-act="deliver">${icon('check')} تحویل به مریض</button>` : ''}</div>`;
       const byId = new Map(r.tests.map(t => [t.id, t]));
@@ -230,7 +241,7 @@ Pages['lab-work'] = {
           const al = alarmOf(t, el.value, resolveRange(t, sex, ageDays)); el.classList.toggle('impossible', al === 'impossible'); el.closest('tr').classList.toggle('alarm', al === 'alarm'); el.title = al === 'impossible' ? 'این مقدار ممکن نیست — دوباره بررسی کنید' : al === 'alarm' ? 'در محدوده خطر' : '';
           // delta check: big change from the previous answer of this patient
           const pv = ((r.prev || {})[t.id] || [])[0], a1 = num(String(el.value).replace(/^[<>]=?\s*/, '')), a0 = pv ? num(String(pv.value).replace(/^[<>]=?\s*/, '')) : null;
-          const lim = Number(t.delta_pct ?? App.settings.lab_delta_pct ?? 50) || 0;
+          const lim = App.settings.lab_delta_on === '1' ? (Number(t.delta_pct ?? App.settings.lab_delta_pct ?? 50) || 0) : 0;   // off unless switched on in Settings
           const dpct = a1 !== null && a0 ? Math.abs(a1 - a0) / Math.abs(a0) * 100 : 0;
           const dl = lim > 0 && dpct > lim;
           el.closest('tr').classList.toggle('delta', dl);
@@ -243,9 +254,14 @@ Pages['lab-work'] = {
         const nv = e.target.closest('[data-nav]'); if (nv) { go('lab-work', { id: Number(nv.dataset.nav) }); return; }
         const tg = e.target.closest('[data-trend]'); if (tg) { labTrendDialog(r.patient, byId.get(Number(tg.dataset.trend)), sex, ageDays).catch(errToast); return; }
         const b = e.target.closest('[data-cmt]'); if (!b) return; const tr = $(`[data-cmtrow="${b.dataset.cmt}"]`, view); tr.classList.toggle('hidden'); if (!tr.classList.contains('hidden')) $('input', tr).focus(); });
+      // answer codes: «32» + Enter → Yellow; «*» + Enter → every empty field of that table is starred (not needed in the report)
+      const resolveOpt = (el) => { if (!el.matches('.optIn')) return; const v = el.value.trim(); if (!/^\d+$/.test(v)) return; const o = JSON.parse(el.dataset.optcodes || '[]').find(x => x.code === v); if (o) { el.value = o.label; el.dispatchEvent(new Event('input', { bubbles: true })); } };
+      $('#workBody', view).addEventListener('change', (e) => { if (e.target.matches && e.target.matches('.optIn')) resolveOpt(e.target); }, true);
       $('#workBody', view).addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' || !e.target.matches('input[data-tid], select[data-tid], input[data-note]')) return;
         e.preventDefault();
+        resolveOpt(e.target);
+        if (e.target.value.trim() === '*') { $$('[data-tid]', e.target.closest('table')).forEach(x => { if (!x.readOnly && !x.disabled && !String(x.value).trim()) x.value = '*'; }); $('#workBody', view).dispatchEvent(new Event('input')); }
         const page = e.target.closest('.deptPage');
         const inPage = $$('[data-tid]:not([readonly]):not([disabled])', page);
         const from = e.target.matches('[data-note]') ? $(`[data-tid="${e.target.dataset.note}"]`, view) : e.target;
@@ -273,11 +289,12 @@ Pages['lab-work'] = {
         // auto-verification: completed results that are all normal (no flag, no alarm, no delta) are approved at once
         if (b.dataset.st === 'completed' && App.settings.lab_autoverify === '1' && clean && col.some(x => String(x.value).trim())) { r = await API.post('/api/lab/results/' + r.id, { results: col, status: 'approved', report_note: $('#repNote', view).value }); auto = true; }
         toast(auto ? 'همه نتایج نارمل بود — خودکار تأیید و برای داکتر فرستاده شد' : b.dataset.st === 'approved' ? 'تأیید شد و برای داکتر فرستاده شد' : 'ذخیره شد', 'good'); draw();
-        if (crit.length && ['completed', 'approved'].includes(b.dataset.st)) criticalCallDialog(r, crit.map(x => ({ ...x, test: (r.tests || []).find(t => t.id === x.test_id) })));
+        if (crit.length && App.settings.lab_critical_dialog === '1' && ['completed', 'approved'].includes(b.dataset.st)) criticalCallDialog(r, crit.map(x => ({ ...x, test: (r.tests || []).find(t => t.id === x.test_id) })));
       }),
       reopen: async () => { r = await API.post('/api/lab/results/' + r.id, { results: [], status: 'received' }); draw(); },
       report: async () => { if (!['approved', 'delivered'].includes(r.status)) { r = await API.post('/api/lab/results/' + r.id, { results: view._collect(), report_note: $('#repNote', view).value }); } previewDoc(labReportHTML(r), { size: 'A4', title: r.lab_code, onPrinted: () => API.post('/api/lab/printed/' + r.id).catch(() => { }) }); },
       receipt: () => previewDoc(labReceiptsHTML(r), { size: 'receipt', title: r.lab_code }),
+      share: () => labShareDialog(r),
       defaults: () => { let k = 0; $$('[data-tid]', view).forEach(el => { const t = r.tests.find(x => x.id === Number(el.dataset.tid)); if (t && t.default_answer && !String(el.value).trim() && !el.readOnly) { el.value = t.default_answer; k++; } }); $('#workBody', view).dispatchEvent(new Event('input')); toast(k ? `${k} جواب پیش‌فرض نوشته شد` : 'آزمایشی با جواب پیش‌فرض خالی نمانده'); },
       sample: async () => {
         // keep what was typed: save the draft results before redrawing
@@ -286,6 +303,8 @@ Pages['lab-work'] = {
         if (await confirmDlg('لیبل تیوب‌ها چاپ شود؟')) printDoc(tubeLabelsHTML(r), { size: 'label', title: r.lab_code });
       },
       labels: () => previewDoc(tubeLabelsHTML(r), { size: 'label', title: r.lab_code }),
+      starAll: () => { $$('[data-tid]', view).forEach(x => { if (!x.readOnly && !x.disabled && !x.classList.contains('calc') && !String(x.value).trim()) x.value = '*'; }); $('#workBody', view).dispatchEvent(new Event('input')); toast('خانه‌های خالی ستاره شد — حالا فقط نتایج لازم را بنویسید'); },
+      unstar: () => { $$('[data-tid]', view).forEach(x => { if (!x.readOnly && String(x.value).trim() === '*') x.value = ''; }); $('#workBody', view).dispatchEvent(new Event('input')); },
       pay: async () => { const a = await promptDlg('دریافت باقی', { label: 'مبلغ', value: r.net - r.paid, type: 'number' }); if (a) { r = await API.post('/api/lab/pay/' + r.id, { amount: Number(a) }); draw(); } },
       deliver: async () => { r = await API.post('/api/lab/results/' + r.id, { results: [], status: 'delivered' }); draw(); }
     });
@@ -298,6 +317,7 @@ Pages['lab-walkin'] = {
   async render(view, params) {
     const cat = await loadLabCatalog(true);
     const sel = []; let dep = 'all';
+    const walkCentral = (App.settings.cashier_mode || 'central') === 'central' && App.user.station === 'lab';
     const orderable = cat.tests.filter(t => t.active && (t.orderable || t.is_panel));
     const deps = cat.departments.filter(d => orderable.some(t => t.department_id === d.id));
     view.innerHTML = `<div class="pageHead"><div><h1>پذیرش مریض بیرونی</h1><p>برای مریضی که نسخه داکتر کلینیک ندارد (یا از بیرون آمده). کد لابراتوار ساخته می‌شود.</p></div></div>
@@ -308,10 +328,16 @@ Pages['lab-walkin'] = {
         <div class="pickWrap" data-fold="walkin"><button type="button" class="btn sm ghost foldBtn" data-foldbtn="walkin">${icon('list', 13)} <span class="fShow">نمایش دکمه‌های آزمایش</span><span class="fHide">پنهان کردن دکمه‌ها</span></button><div class="pickBody">
         <div class="deptTabs" id="wDeps" style="position:static;margin-top:10px"><button data-dep="all" class="on">همه</button>${deps.map(d => `<button data-dep="${d.id}" title="${esc(d.name_fa || '')}">${esc(d.name || d.code)}</button>`).join('')}</div>
         <div class="testChips" id="wChips"></div></div></div>
-        <div class="selList" id="wl" style="margin-top:10px"></div><div id="wWarn"></div><div class="totals"><div><span>جمع</span><b id="wsum">0</b></div><div><span>سهم مریض</span><b id="wnet">0</b></div></div>
-        <button class="btn primary lg" data-act="create" style="margin-top:12px">${icon('next')} ثبت و رفتن به پذیرش و فیس</button></div></div>`;
+        <div class="selList" id="wl" style="margin-top:10px"></div><div id="wWarn"></div>
+        <div class="payBox"><div class="totals"><div><span>جمع قیمت آزمایش‌ها</span><b id="wsum">0</b></div><div id="wOrgRow" class="hidden"><span>سهم مؤسسه / بیمه</span><b id="wOrg"></b></div>
+          <div><span>تخفیف ٪</span><span class="bar"><input type="number" id="wPct" value="" placeholder="0" min="0" max="100" style="width:70px"> <small>یا مبلغ</small> <input type="number" id="wAmt" min="0" style="width:90px"></span></div>
+          <div><span>قابل پرداخت (سهم مریض)</span><b id="wnet">0</b></div></div>
+          ${walkCentral ? `<div class="infoBox" style="margin-top:10px">${icon('cash', 15)} فیس در <b>صندوق پذیرش</b> گرفته می‌شود — بل خودکار به صندوق می‌رود.</div>`
+            : `<div class="formGrid" style="margin-top:10px"><label class="field"><span>دریافت شده</span><input type="number" id="wPaid"></label><label class="field"><span>طریقه</span><select id="wPm">${opt(Object.entries(PAY_METHODS), 'cash')}</select></label></div>`}</div>
+        <div class="bar" style="margin-top:12px"><button class="btn primary lg" data-act="createRecv" data-print="1">${icon('print')} ثبت، پذیرش و چاپ رسید</button><button class="btn lg" data-act="createRecv">${icon('check')} ثبت و پذیرش</button>
+          <button class="btn ghost" data-act="create" title="فقط ثبت درخواست؛ فیس بعداً">${icon('next')} فقط ثبت (فیس بعداً)</button></div></div></div>`;
     let calcFn = null;
-    const pt = bindPtPicker(view, 'wPt', { onPick: () => calcFn && calcFn() }); const dr = bindDoctorPicker(view, 'wDr', { selected: '' });
+    const pt = bindPtPicker(view, 'wPt', { onPick: () => calcFn && calcFn() }); const dr = bindDoctorPicker(view, 'wDr', { selected: params.doctor_id || '' });
     const rf = bindLabReceptionFields(view, 'wR', cat, { onChange: () => calcFn && calcFn() }); rf.touchAnswer();
     const chips = () => {
       const q = $('#wt', view).value.trim().toLowerCase();
@@ -320,7 +346,9 @@ Pages['lab-walkin'] = {
     };
     const drawSel = calcFn = () => {
       $('#wl', view).innerHTML = sel.map(id => { const t = cat.byId.get(id); return `<div class="selRow"><span class="codeTag" title="${esc(t.name)}">${esc(t.code)}</span><span class="nm muted small">${t.is_panel ? 'پنل' : ''}${t.sendout_lab ? ' · ارسالی' : ''}</span><b>${money(t.price)}</b><button class="btn ghost icon" data-rm="${id}">${icon('x', 14)}</button></div>`; }).join('');
-      const pc = labPriceCalc(cat, sel, rf.rtId()); $('#wsum', view).textContent = money(pc.sub); $('#wnet', view).textContent = money(pc.net);
+      const pc = labPriceCalc(cat, sel, rf.rtId(), $('#wPct', view).value, $('#wAmt', view).value); $('#wsum', view).textContent = money(pc.sub); $('#wnet', view).textContent = money(pc.net) + ' ' + currency();
+      $('#wOrg', view).textContent = money(pc.org); $('#wOrgRow', view).classList.toggle('hidden', !pc.org);
+      const wp = $('#wPaid', view); if (wp && !wp.dataset.t) wp.value = pc.net;
       rf.setAnswerDate(sel.length ? labAnswerDateCalc(cat, sel, rf.urgent()) : '');
       const w = labReceptionWarnings(cat, sel, { sex: pt.patient ? pt.patient.sex : $('#wPt [name=sex]', view).value }, rf.rtId());
       $('#wWarn', view).innerHTML = w.length ? `<div class="cdss">${w.map(x => `<div>⚠ ${esc(x)}</div>`).join('')}</div>` : '';
@@ -337,9 +365,25 @@ Pages['lab-walkin'] = {
         const who = pt.value(); if (!sel.length) throw new Error('آزمایش انتخاب نشده');
         if (!(await labPreSaveChecks(who.patient_id, sel, null, who.patient))) return;
         const r = await API.post('/api/lab/walkin', { ...who, ...rf.value(), test_ids: sel, doctor_id: dr.get() || null });
+        if (params.referral_id) await API.post('/api/lab/referral-done/' + params.referral_id, { lab_request_id: r.id }).catch(() => { });
+        openLabWork(r.id);
+      }),
+      // one step: register, apply the discount, take the fee (or send the bill to the reception cash) and print the receipts
+      createRecv: (b) => busy(b, async () => {
+        const who = pt.value(); if (!sel.length) throw new Error('آزمایش انتخاب نشده');
+        const pc = labPriceCalc(cat, sel, rf.rtId(), $('#wPct', view).value, $('#wAmt', view).value);
+        if (!rf.discountOk(pc.discount)) throw new Error('برای تخفیف، دلیل تخفیف و نام تخفیف دهنده را بنویسید');
+        if (!(await labPreSaveChecks(who.patient_id, sel, null, who.patient))) return;
+        const w = await API.post('/api/lab/walkin', { ...who, ...rf.value(), test_ids: sel, doctor_id: dr.get() || null });
+        if (params.referral_id) await API.post('/api/lab/referral-done/' + params.referral_id, { lab_request_id: w.id }).catch(() => { });
+        const r = await API.post('/api/lab/receive/' + w.id, { ...rf.value(), test_ids: sel, discount: $('#wAmt', view).value === '' ? undefined : $('#wAmt', view).value, discount_pct: $('#wPct', view).value, paid: walkCentral ? undefined : $('#wPaid', view)?.value, pay_method: $('#wPm', view)?.value || 'cash' });
+        toast(walkCentral && r.net - r.paid > 0.001 ? `پذیرش شد — ${r.lab_code} · ${money(r.net - r.paid)} در صندوق پذیرش پرداخت شود` : `پذیرش شد — ${r.lab_code}`, 'good');
+        if (b.dataset.print) await printDoc(labReceiptsHTML(r), { size: 'receipt', title: r.lab_code });
         openLabWork(r.id);
       })
     });
+    $('#wPct', view).oninput = () => { $('#wAmt', view).value = ''; drawSel(); }; $('#wAmt', view).oninput = () => drawSel();
+    if ($('#wPaid', view)) $('#wPaid', view).oninput = (e) => e.target.dataset.t = 1;
     drawSel();
   }
 };
@@ -350,17 +394,19 @@ Pages['lab-list'] = {
     view.innerHTML = `<div class="pageHead"><div><h1>آزمایش‌ها و نتایج</h1><p>همه درخواست‌ها و نتایج با کد لابراتوار.</p></div><div class="toolbar"><button class="btn" data-act="csv">${icon('download')} CSV</button></div></div>
       <div class="filterBar"><label class="field"><span>از</span>${dateInput('from', isoDate(addDays(new Date(), -7)), 'id="l_from"')}</label><label class="field"><span>تا</span>${dateInput('to', today(), 'id="l_to"')}</label>
       <label class="field"><span>وضعیت</span><select id="l_st">${opt(Object.entries(LAB_STATUS).map(([k, v]) => [k, v[0]]), '', { empty: 'همه' })}</select></label><label class="field grow"><span>جستجو</span><input id="l_q"></label></div>
-      <div class="card"><div class="tableWrap"><table class="t"><thead><tr><th>کد</th><th>تاریخ</th><th>مریض</th><th>داکتر</th><th>آزمایش‌ها</th><th>مبلغ</th><th>پرداخت</th><th>وضعیت</th></tr></thead><tbody id="lB"></tbody></table></div><div class="sum" id="lS"></div></div>`;
+      <div class="card"><div class="tableWrap"><table class="t"><thead><tr><th>کد</th><th>تاریخ</th><th>مریض</th><th>داکتر</th><th>آزمایش‌ها</th><th>مبلغ</th><th>پرداخت</th><th>وضعیت</th><th></th></tr></thead><tbody id="lB"></tbody></table></div><div class="sum" id="lS"></div></div>`;
     let rows = [];
     const load = async () => {
       const q = { from: dateOf($('#l_from', view)), to: dateOf($('#l_to', view)), q: $('#l_q', view).value.trim(), limit: 5000 }; if ($('#l_st', view).value) q['eq.status'] = $('#l_st', view).value;
       rows = await API.list('lab_requests', q);
-      $('#lB', view).innerHTML = rows.map(r => `<tr class="clickable" data-id="${r.id}"><td class="rxCode" style="font-size:13px">${esc(r.lab_code)}</td><td>${fmtDate(r.date)}</td><td><b>${esc(r.full_name)}</b> <small class="muted">${esc(r.patient_code)}</small></td><td>${esc(r.doctor_name || '—')}</td><td class="en small">${esc(r.tests || '')}</td><td>${money(r.net || r.subtotal)}</td><td>${money(r.paid)}</td><td>${statusPill(LAB_STATUS, r.status)}</td></tr>`).join('') || emptyRow(8);
+      $('#lB', view).innerHTML = rows.map(r => `<tr class="clickable" data-id="${r.id}"><td class="rxCode" style="font-size:13px">${esc(r.lab_code)}</td><td>${fmtDate(r.date)}</td><td><b>${esc(r.full_name)}</b> <small class="muted">${esc(r.patient_code)}</small></td><td>${esc(r.doctor_name || '—')}</td><td class="en small">${esc(r.tests || '')}</td><td>${money(r.net || r.subtotal)}</td><td>${money(r.paid)}</td><td>${statusPill(LAB_STATUS, r.status)}</td><td>${['requested', 'received'].includes(r.status) && !(r.paid > 0) ? `<button class="btn sm ghost dangerText" data-lbdel="${r.id}" title="حذف این پذیرش (اشتباه ثبت شده)">${icon('trash', 13)}</button>` : ''}</td></tr>`).join('') || emptyRow(9);
       const act = rows.filter(r => !['requested', 'cancelled'].includes(r.status));
       $('#lS', view).innerHTML = `<span>تعداد: <b>${rows.length}</b></span><span>پذیرش شده: <b>${act.length}</b></span><span>مبلغ: <b>${money(sumBy(act, 'net'))}</b></span><span>دریافت: <b>${money(sumBy(act, 'paid'))}</b></span>`;
     };
     $$('#l_from, #l_to, #l_st', view).forEach(el => el.addEventListener('change', load)); $('#l_q', view).addEventListener('input', debounce(load, 300));
-    view.addEventListener('click', (e) => { const tr = e.target.closest('tr.clickable'); if (tr) openLabWork(Number(tr.dataset.id)); });
+    view.addEventListener('click', async (e) => {
+      const d = e.target.closest('[data-lbdel]'); if (d) { e.stopPropagation(); if (await confirmDlg('این پذیرش کاملاً حذف شود؟ (فقط پذیرش بدون پرداخت و بدون نتیجه حذف می‌شود)', { danger: true, okText: 'حذف' })) { try { await API.post('/api/lab/delete/' + d.dataset.lbdel); toast('حذف شد', 'good'); load(); } catch (err) { errToast(err); } } return; }
+      const tr = e.target.closest('tr.clickable'); if (tr) openLabWork(Number(tr.dataset.id)); });
     actions(view, { csv: () => exportCSV('lab-requests', rows, [['lab_code', 'کد'], ['date', 'تاریخ'], ['patient_code', 'کد مریض'], ['full_name', 'نام'], ['doctor_name', 'داکتر'], ['tests', 'آزمایش‌ها'], ['net', 'مبلغ'], ['paid', 'پرداخت'], [r => LAB_STATUS[r.status]?.[0], 'وضعیت']]) });
     await load();
   }
@@ -432,7 +478,7 @@ Pages['lab-tests'] = {
         <label class="field"><span>بحرانی پایین (عمومی)</span><input name="critical_low" type="number" step="any" value="${esc(t.critical_low ?? '')}"></label><label class="field"><span>بحرانی بالا (عمومی)</span><input name="critical_high" type="number" step="any" value="${esc(t.critical_high ?? '')}"></label>
         <label class="field"><span>Delta check ٪ (تغییر زیاد از جواب قبلی؛ خالی = عمومی)</span><input name="delta_pct" type="number" step="any" value="${esc(t.delta_pct ?? '')}" placeholder="${esc(App.settings.lab_delta_pct || 50)}"></label>
         <label class="field"><span>کمترین مقدار ممکن</span><input name="possible_low" type="number" step="any" value="${esc(t.possible_low ?? '')}"></label><label class="field"><span>بیشترین مقدار ممکن</span><input name="possible_high" type="number" step="any" value="${esc(t.possible_high ?? '')}"></label>
-        <label class="field span2"><span>گزینه‌ها (برای انتخابی، با کامه)</span><input id="ltOpts" class="en" value="${esc(JSON.parse(t.options || '[]').join(', '))}"></label>
+        <label class="field span2"><span>گزینه‌ها (برای انتخابی، با کامه؛ با کد: 32=Yellow, 33=Amber)</span><input id="ltOpts" class="en" value="${esc(JSON.parse(t.options || '[]').join(', '))}"></label>
         <label class="field span2"><span>فرمول (مثلاً {TCHOL}-{HDL}-{TG}/5)</span><input name="formula" class="ltr" value="${esc(t.formula || '')}"></label>
         <label class="field"><span>قیمت (نرخ آزاد)</span><input name="price" type="number" value="${esc(t.price)}"></label><label class="field"><span>نرخ بیمه</span><input name="price_ins" type="number" value="${esc(t.price_ins ?? '')}" placeholder="مثل نرخ آزاد"></label>
         <label class="field"><span>قیمت تمام شد</span><input name="cost" type="number" value="${esc(t.cost || 0)}"></label>
@@ -587,7 +633,7 @@ Pages['lab-items'] = {
       const m = modal({ title: (kind === 'in' ? 'ورود مواد — ' : 'مصرف / تعدیل — ') + esc(it.name), body: `<div class="formGrid" id="mvF">
         ${kind === 'in' ? '' : `<label class="field"><span>نوع</span><select name="kind">${opt([['use', 'مصرف دستی'], ['expired', 'انقضا / ضایع'], ['adjust', 'تعدیل (شمارش)']], 'use')}</select></label>`}
         <label class="field"><span>مقدار ${kind === 'in' ? '' : '(تعدیل: + یا −)'}</span><input name="qty" type="number" step="any"></label><label class="field"><span>تاریخ</span>${dateInput('date', today())}</label>
-        ${kind === 'in' ? `<label class="field"><span>قیمت واحد</span><input name="unit_cost" type="number" step="any" value="${esc(it.cost)}"></label><label class="field"><span>تاریخ انقضا</span>${dateInput('expiry', it.expiry)}</label>` : ''}
+        ${kind === 'in' ? `<label class="field"><span>نمبر فاکتور</span><input name="factor_no" class="ltr"></label><label class="field"><span>کمپنی / فروشنده</span><input name="supplier" value="${esc(it.supplier || '')}"></label><label class="field"><span>قیمت واحد</span><input name="unit_cost" type="number" step="any" value="${esc(it.cost)}"></label><label class="field"><span>تاریخ انقضا</span>${dateInput('expiry', it.expiry)}</label>` : ''}
         <label class="field full"><span>یادداشت</span><input name="note"></label></div><div class="mini">موجودی فعلی: <b>${fmtNum(it.stock)} ${esc(it.unit || '')}</b></div>`,
         foot: `<button class="btn primary" id="mv_ok">ثبت</button><button class="btn" data-x>انصراف</button>` });
       $('[data-x]', m.el).onclick = m.close;
@@ -603,8 +649,8 @@ Pages['lab-items'] = {
           <div class="tableWrap" style="max-height:60vh"><table class="t"><thead><tr><th>تاریخ</th><th>نوع</th><th>مقدار</th><th>مرجع</th><th>کاربر</th><th>یادداشت</th></tr></thead><tbody>${it.moves.map(x => `<tr><td>${fmtDate(x.date)} <small class="muted ltr">${fmtTime(x.at)}</small></td><td>${statusPill(KIND, x.kind)}</td><td class="${x.qty < 0 ? 'neg' : 'pos'}">${fmtNum(x.qty)}</td><td class="codeTag">${esc(x.ref_type === 'lab_request' ? x.note : '')}</td><td>${esc(x.user_name || '')}</td><td>${esc(x.ref_type ? '' : x.note || '')}</td></tr>`).join('') || emptyRow(6)}</tbody></table></div>` });
       },
       usage: async () => {
-        const m = modal({ title: 'گزارش مصرف مواد', size: 'wide', body: `<div class="filterBar">${dateInput('from', mf, 'id="u_from" style="width:120px"')}${dateInput('to', today(), 'id="u_to" style="width:120px"')}</div><div id="uB"></div>`, foot: `<button class="btn" id="uPr">${icon('print')} چاپ</button><button class="btn" data-x>بستن</button>` });
-        const run = async () => { const r = await API.get('/api/lab/items-usage', { from: dateOf($('#u_from', m.el)), to: dateOf($('#u_to', m.el)) }); $('#uB', m.el).innerHTML = `<table class="t rt rtl"><thead><tr><th>مواد</th><th>مصرف</th><th>ورود</th><th>موجودی</th><th>ارزش مصرف</th></tr></thead><tbody>${r.map(x => `<tr><td>${esc(x.name)} <small class="muted">${esc(x.unit || '')}</small></td><td>${fmtNum(x.used)}</td><td>${fmtNum(x.received)}</td><td>${fmtNum(x.stock)}</td><td>${money(x.used * x.cost)}</td></tr>`).join('') || emptyRow(5)}</tbody></table>`; };
+        const m = modal({ title: 'گزارش ماهانه مواد: اول ماه، خرید، مصرف، آخر ماه', size: 'wide', body: `<div class="filterBar">${dateInput('from', mf, 'id="u_from" style="width:120px"')}${dateInput('to', today(), 'id="u_to" style="width:120px"')}</div><div id="uB"></div>`, foot: `<button class="btn" id="uPr">${icon('print')} چاپ</button><button class="btn" data-x>بستن</button>` });
+        const run = async () => { const r = await API.get('/api/lab/items-usage', { from: dateOf($('#u_from', m.el)), to: dateOf($('#u_to', m.el)) }); $('#uB', m.el).innerHTML = `<table class="t rt rtl"><thead><tr><th>مواد</th><th>اول دوره</th><th>خرید (ورود)</th><th>مصرف</th><th>آخر دوره</th><th>ارزش مصرف</th><th>موجودی فعلی</th></tr></thead><tbody>${r.map(x => { const low = x.stock <= Math.max(Number(App.settings.low_stock_alert || 3), x.reorder_level || 0); return `<tr><td>${esc(x.name)} <small class="muted">${esc(x.unit || '')}</small></td><td>${fmtNum(r2(x.start_stock))}</td><td>${fmtNum(x.received)}</td><td>${fmtNum(x.used)}</td><td><b>${fmtNum(r2(x.end_stock))}</b></td><td>${money(x.used * x.cost)}</td><td class="${low ? 'neg' : ''}">${fmtNum(x.stock)}${low ? ' ⚠' : ''}</td></tr>`; }).join('') || emptyRow(7)}</tbody></table>`; };
         $$('#u_from, #u_to', m.el).forEach(el => el.addEventListener('change', run)); await run();
         $('[data-x]', m.el).onclick = m.close;
         $('#uPr', m.el).onclick = () => previewDoc(reportDocHTML('گزارش مصرف مواد لابراتوار', `<p>${fmtDate(dateOf($('#u_from', m.el)))} تا ${fmtDate(dateOf($('#u_to', m.el)))}</p>${$('#uB', m.el).innerHTML}`), { title: 'مصرف مواد' });
@@ -630,7 +676,8 @@ Pages['lab-sales'] = {
     barChart($('#lsC', view), agg.map(m => m.short), [{ label: 'عاید', data: agg.map(m => m.v) }], { money: true });
     const loadT = async () => {
       const rows = await API.get('/api/reports/lab-tests', { from: dateOf($('#ls_from', view)), to: dateOf($('#ls_to', view)) });
-      $('#lsT', view).innerHTML = `<table class="t"><thead><tr><th>آزمایش</th><th>تعداد</th><th>فروش</th></tr></thead><tbody>${rows.map(r => `<tr><td class="en">${esc(r.code)} — ${esc(r.name)}</td><td>${r.n}</td><td>${money(r.revenue)}</td></tr>`).join('') || emptyRow(3)}</tbody></table>`;
+      $('#lsT', view).innerHTML = `<table class="t"><thead><tr><th>آزمایش</th><th>تعداد</th><th>فروش</th><th>قیمت تمام شد</th><th>مفاد</th></tr></thead><tbody>${rows.map(r => `<tr><td class="en">${esc(r.code)} — ${esc(r.name)}</td><td>${r.n}</td><td>${money(r.revenue)}</td><td>${money(r.cost || 0)}</td><td class="${r.revenue - (r.cost || 0) < 0 ? 'neg' : 'pos'}"><b>${money(r.revenue - (r.cost || 0))}</b></td></tr>`).join('') || emptyRow(5)}</tbody>
+        <tfoot><tr><td>مجموع</td><td>${sumBy(rows, 'n')}</td><td>${money(sumBy(rows, 'revenue'))}</td><td>${money(sumBy(rows, 'cost'))}</td><td><b>${money(sumBy(rows, 'revenue') - sumBy(rows, 'cost'))}</b></td></tr></tfoot></table>`;
     };
     $$('#ls_from, #ls_to', view).forEach(el => el.addEventListener('change', loadT)); loadT();
   }

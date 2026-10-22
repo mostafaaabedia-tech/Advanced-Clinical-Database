@@ -10,6 +10,7 @@ const NAV = [
   ['users', 'کاربران و دسترسی', 'users', ['admin'], 'admin'],
   ['setup', 'داکتران، خدمات و فیس', 'steth', ['admin'], 'admin'],
   ['settings', 'تنظیمات و سرخط نسخه', 'settings', ['admin'], 'admin'],
+  ['headers', 'سربرگ نسخه، راپور و رسید', 'file', ['doctor', 'lab', 'pharmacy', 'reception'], 'admin'],
   ['audit', 'گزارش فعالیت‌ها', 'audit', ['admin'], 'admin'],
   ['backup', 'پشتیبان دیتابیس', 'database', ['admin'], 'admin'],
 
@@ -39,10 +40,10 @@ const NAV = [
   ['reservations', 'وقت‌دهی / رزرو', 'calendar', ['reception'], 'reception'],
   ['patients', 'مریضان', 'users', ['reception', 'doctor'], 'reception'],
   ['cashier', 'صندوق مرکزی (همه پرداخت‌ها)', 'cash', ['reception'], 'reception'],
-  ['rc-lab', 'پذیرش لابراتوار', 'flask', ['reception'], 'reception'],
   ['ipd', 'بستر و تخت‌ها', 'bed', ['reception', 'doctor'], 'reception'],
   ['rc-cash', 'حسابات روز و تحویل صندوق', 'money', ['reception'], 'reception'],
   ['rc-wd', 'برداشت‌های لابراتوار و پذیرش', 'wallet', ['reception'], 'reception'],
+  ['all-wd', 'برداشت‌های همه بخش‌ها', 'wallet', ['reception'], 'reception'],
   ['rc-month', 'حساب ماهوار لابراتوار', 'trend', ['reception'], 'reception'],
   ['dr-daily', 'آمار روزانه داکتران و نوبت‌ها', 'chart', ['reception'], 'reception'],
   ['qdisplay', 'صفحه نمایش نوبت (TV)', 'tv', ['reception', 'doctor'], 'reception'],
@@ -58,6 +59,7 @@ const NAV = [
   ['templates', 'قالب‌های نسخه', 'star', ['doctor'], 'doctor'],
   ['dr-stats', 'آمار ویزیت‌ها', 'chart', ['doctor'], 'doctor'],
 
+  ['adm-pharmacy', 'دواخانه: فروش، موجودی و کمبودها', 'pill', [], 'pharmacy'],
   ['rx-inbox', 'نسخه‌های رسیده', 'bell', ['pharmacy'], 'pharmacy'],
   ['pos', 'فروش / تحویل نسخه', 'pill', ['pharmacy'], 'pharmacy'],
   ['sales', 'لیست فروشات دواخانه', 'receipt', ['pharmacy', 'stock'], 'pharmacy'],
@@ -65,6 +67,7 @@ const NAV = [
   ['ph-wd', 'برداشت‌های دواخانه', 'wallet', ['pharmacy'], 'pharmacy'],
   ['ph-month', 'حساب ماهوار دواخانه', 'trend', ['pharmacy'], 'pharmacy'],
 
+  ['adm-lab', 'لابراتوار: آزمایش‌ها، مریضان و ریجنت‌ها', 'flask', [], 'lab'],
   ['lab-inbox', 'درخواست‌های آزمایش', 'bell', ['lab'], 'lab'],
   ['lab-walkin', 'پذیرش مریض بیرونی', 'plus', ['lab'], 'lab'],
   ['lab-list', 'آزمایش‌ها و نتایج', 'list', ['lab'], 'lab'],
@@ -83,7 +86,11 @@ const NAV_GROUPS = { admin: 'مدیریت', staff: 'کارمندان، حاضر�
 const HOME = { admin: 'admin-dash', stock: 'stock-dash', reception: 'reception', doctor: 'dr-queue', pharmacy: 'rx-inbox', lab: 'lab-inbox' };
 // users marked «no finance» do not see profit / monthly money reports
 const FINANCE_PAGES = ['monthly', 'month-account', 'compare', 'med-sales', 'rc-month', 'ph-month'];
-const canSee = (page) => { if (App.user?.no_finance && FINANCE_PAGES.includes(page)) return false; const ns = NAV.filter(x => x[0] === page); return !ns.length || App.user?.role === 'admin' || ns.some(n => n[3].includes(App.user?.role)); };
+const canSee = (page) => {
+  if (App.user?.no_finance && FINANCE_PAGES.includes(page)) return false;
+  if (App.user && NavCfg.hidden(App.user.role, page)) return false;   // switched off in Settings → menus
+  const ns = NAV.filter(x => x[0] === page); return !ns.length || App.user?.role === 'admin' || ns.some(n => n[3].includes(App.user?.role));
+};
 const isRole = (...r) => App.user && (App.user.role === 'admin' || r.includes(App.user.role));
 
 // ---------- station ----------
@@ -114,9 +121,7 @@ function applyBranding() {
 
 function renderNav() {
   const role = App.user.role;
-  const items = NAV.filter(n => (role === 'admin' || n[3].includes(role)) && !(App.user.no_finance && FINANCE_PAGES.includes(n[0])));
-  const rank = (n) => n[4] === 'local' ? 3 : n[4] === 'staff' ? 2 : n[4] === role ? 0 : 1;
-  if (role !== 'admin') items.sort((a, b) => rank(a) - rank(b));
+  const items = NavCfg.items(role).filter(n => !(App.user.no_finance && FINANCE_PAGES.includes(n[0])));
   let lastGroup = null, html = '';
   for (const n of items) {
     const g = role === 'admin' ? n[4] : (n[4] === 'local' ? 'local' : n[4] === 'staff' ? 'staff' : role);
@@ -130,7 +135,7 @@ function renderNav() {
 }
 
 async function go(page, params = {}) {
-  if (!Pages[page] || !canSee(page)) page = HOME[App.user.role] || 'local';
+  if (!Pages[page] || !canSee(page)) { page = HOME[App.user.role] || 'local'; if (!canSee(page)) page = (NavCfg.items(App.user.role)[0] || ['local'])[0]; }
   App.page = page; App.params = params;
   $$('#sidebar .navItem').forEach(b => b.classList.toggle('on', b.dataset.page === page));
   destroyCharts();
@@ -141,6 +146,7 @@ async function go(page, params = {}) {
   try { await Pages[page].render(fresh, params); }
   catch (e) { errToast(e); fresh.innerHTML = `<div class="card"><h2>خطا</h2><p class="muted">${esc(e.message)}</p></div>`; }
   applyFolds(fresh);
+  Layout.attach(fresh, page);
   if (typeof countUp === 'function') countUp(fresh);
   refreshCounts();
 }
@@ -166,6 +172,9 @@ async function startSession() {
   $('#avatar').textContent = (u.full_name || u.username).trim().charAt(0);
   $('#brandStation').textContent = STATIONS[App.station]?.name || ROLES[u.role] || '';
   renderNav();
+  // admin: arrange the tabs / cards / charts of the open page
+  $('#layoutBtn')?.remove();
+  if (u.role === 'admin') { const lb = document.createElement('button'); lb.className = 'topBtn'; lb.id = 'layoutBtn'; lb.title = 'چیدمان این صفحه (پنهان / جابجا کردن تب‌ها، بخش‌ها و چارت‌ها)'; lb.innerHTML = icon('edit', 16); lb.onclick = () => Layout.toggleEdit(); $('#themeBtn').before(lb); }
   connectEvents();
   go(HOME[u.role] || 'local');
   if (u.must_change) setTimeout(() => changePasswordDlg(true), 400);
@@ -213,9 +222,11 @@ function onLiveEvent(m) {
       if (['stock', 'admin'].includes(role) && Date.now() - (lowStockSeen.get(d.id) || 0) > 3600000) { lowStockSeen.set(d.id, Date.now()); toast(`موجودی «${d.name}» کم است (${d.stock})`, 'bad'); }
       break;
     case 'sale:paid': if (role === 'pharmacy') notify('پول نسخه در صندوق پرداخت شد', `${d.sale_code}${d.rx_code ? ' / ' + d.rx_code : ''} — ${d.patient_name || ''} · دوا را تحویل دهید`); break;
-    case 'lab:paid': if (role === 'lab') notify('فیس آزمایش در صندوق پرداخت شد', d.lab_code); break;
+    case 'lab:paid': if (role === 'lab') notify(d.balance > 0.001 ? 'قسمتی از فیس آزمایش پرداخت شد' : 'فیس آزمایش در صندوق کامل پرداخت شد', `${d.lab_code} — ${d.full_name || ''}${d.balance > 0.001 ? ` · باقی ${money(d.balance)} ${currency()}` : ' ✓'}`); break;
+    case 'lab:bill': if (role === 'reception') notify('بل لابراتوار برای صندوق رسید', `${d.lab_code} — ${d.full_name} · ${money(d.due)} ${currency()}`); break;
+    case 'lab:referral': if (role === 'lab' && d.full_name) notify('مریض از پذیرش به لابراتوار فرستاده شد', `${d.code} — ${d.full_name}${d.note ? ' · ' + d.note : ''}`); break;
     case 'labitem:low': if (['lab', 'stock', 'admin'].includes(role) && Date.now() - (lowStockSeen.get('l' + d.id) || 0) > 3600000) { lowStockSeen.set('l' + d.id, Date.now()); toast(`مواد لابراتوار «${d.name}» کم است (${d.stock})`, 'bad'); } break;
-    case 'settings:update': case 'setup:update': loadBootstrap().catch(() => { }); break;
+    case 'settings:update': case 'setup:update': loadBootstrap().then(() => { if (!Layout.edit) { renderNav(); $$('#sidebar .navItem').forEach(b => b.classList.toggle('on', b.dataset.page === App.page)); Layout.apply(); } }).catch(() => { }); break;
     case 'reload': setTimeout(() => location.reload(), 800); return;
   }
   refreshCounts();

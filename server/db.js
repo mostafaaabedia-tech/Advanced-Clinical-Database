@@ -6,6 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const initSqlJs = require('sql.js/dist/sql-wasm.js');
 const { TABLES, VIEWS, SCHEMA_VERSION } = require('./schema');
+const { TABLES_V15 } = require('./v15');
 const { TABLES_EXTRA } = require('./extra');
 const seed = require('./seed');
 
@@ -53,6 +54,7 @@ class ClinicDatabase {
     this.db.exec('PRAGMA foreign_keys = ON;');
     this.db.exec(TABLES);
     this.db.exec(TABLES_EXTRA);
+    this.db.exec(TABLES_V15);
     this.migrate();
     this.db.exec(VIEWS);
     seed.ensureDefaults(this);
@@ -150,6 +152,8 @@ class ClinicDatabase {
     // v1.4
     add('medicines', 'controlled', 'INTEGER'); add('medicines', 'ved', 'TEXT'); add('purchases', 'po_id', 'INTEGER'); add('users', 'no_finance', 'INTEGER');
     add('lab_tests', 'delta_pct', 'REAL'); add('lab_requests', 'auto_verified', 'INTEGER');
+    add('lab_item_moves', 'factor_no', 'TEXT'); add('lab_item_moves', 'supplier', 'TEXT');
+    add('doctors', 'header_html', 'TEXT'); add('doctors', 'footer_html', 'TEXT');
     for (const [c, d] of [['person', 'TEXT'], ['purchase_id', 'INTEGER'], ['purchase_payment_id', 'INTEGER'], ['factor_no', 'TEXT']]) add('withdrawals', c, d);
     if (v < SCHEMA_VERSION) {
       if (v >= 1 && v < 2) {

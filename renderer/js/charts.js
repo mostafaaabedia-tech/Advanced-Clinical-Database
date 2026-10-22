@@ -46,7 +46,9 @@ function barChart(canvas, labels, datasets, { stacked = false, money: isMoney = 
     type: 'bar', data: { labels, datasets: ds },
     options: {
       indexAxis: horizontal ? 'y' : 'x', scales, interaction: { mode: horizontal ? 'nearest' : 'index', intersect: horizontal },
-      plugins: { tooltip: { callbacks: { label: (ctx) => ` ${ctx.dataset.label}: ${isMoney ? money(ctx.parsed[horizontal ? 'x' : 'y']) + ' ' + currency() : money(ctx.parsed[horizontal ? 'x' : 'y'])}` } } },
+      // several series in one chart get a legend so they are not mistaken for one (income / discount / net …)
+      plugins: { legend: { display: datasets.length > 1 && !canvas.closest('.card')?.querySelector('.legendRow'), position: 'bottom', labels: { boxWidth: 12, boxHeight: 12, usePointStyle: true } },
+        tooltip: { callbacks: { label: (ctx) => ` ${ctx.dataset.label}: ${isMoney ? money(ctx.parsed[horizontal ? 'x' : 'y']) + ' ' + currency() : money(ctx.parsed[horizontal ? 'x' : 'y'])}` } } },
       onClick: onClick ? (e, els) => { if (els[0]) onClick(els[0].index); } : undefined
     }
   });

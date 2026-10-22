@@ -47,7 +47,25 @@ function previewDoc(html, { size = 'A4', title = 'سند', extraFoot = '', onPri
 // ---------- shared pieces ----------
 const logoSrc = () => App.settings.clinic_logo || 'img/logo.png';
 const phones = () => listSetting('clinic_phones');
-function clinicLetterhead() {
+// headers designed in «سربرگ» (like a Word header): per kind (prescription, laboratory, reports) or per doctor
+function hdrFill(html, doctor) {
+  const s = App.settings;
+  const map = { clinic: esc(s.clinic_name || ''), clinic_en: esc(s.clinic_name_en || ''), logo: `<img src="${logoSrc()}" alt="" style="max-height:28mm">`, phones: phones().map(p => `<span class="ltr">${esc(p)}</span>`).join(' · '),
+    address: esc(s.clinic_address || ''), doctor: doctor ? esc(doctorName(doctor)) : '', doctor_title: esc(doctor?.title || ''), doctor_lines: doctor ? String(doctor.header_lines || doctor.specialty || '').split(/\r?\n/).filter(Boolean).map(esc).join('<br>') : '', date: esc(fmtDate(new Date())) };
+  return String(html || '').replace(/\{(clinic_en|clinic|logo|phones|address|doctor_title|doctor_lines|doctor|date)\}/g, (m, k) => map[k]);
+}
+function customHdr(kind, doctor, foot) {
+  const s = App.settings;
+  if (kind === 'rx' && doctor) { const d = (App.doctors || []).find(x => x.id === doctor.id) || doctor; const h = foot ? d.footer_html : d.header_html; if (h) return hdrFill(h, d); }
+  const key = { rx: 'hdr_rx', lab: 'hdr_lab', report: 'hdr_report' }[kind] || 'hdr_report';
+  const h = s[key + (foot ? '_foot' : '')];
+  return h ? hdrFill(h, doctor) : '';
+}
+function clinicLetterhead(kind = 'report', doctor) {
+  const c = customHdr(kind, doctor); if (c) return `<div class="lh custom">${c}</div>`;
+  return defaultLetterhead();
+}
+function defaultLetterhead() {
   const s = App.settings;
   const docs = App.doctors.filter(d => d.active && d.on_letterhead);
   const right = docs.find(d => d.letterhead_side !== 'left') || docs[0];
@@ -59,12 +77,15 @@ function clinicLetterhead() {
     <div class="lhRow">${block(right, 'right')}<div class="lhLogo"><img src="${logoSrc()}" alt=""><div class="lhLogoText">${esc(s.clinic_logo_text || '')}</div></div>${block(left, 'left')}</div>
     <div class="lhRule"></div></div>`;
 }
-function clinicFooter(extra = '') {
+function clinicFooter(extra = '', kind = 'report', doctor) {
+  const c = customHdr(kind, doctor, true); if (c) return `<div class="lhFoot custom">${extra}${c}</div>`;
   const s = App.settings;
   return `<div class="lhFoot">${extra}<div class="lhPhones"><span class="ph">☎</span>${phones().map(p => `<span class="phone ltr">${esc(p)}</span>`).join('')}</div>
     <div class="lhAddr">${esc(s.clinic_address || '')}</div></div>`;
 }
-function smallHead(title) {
+function smallHead(title, kind) {
+  const h = kind && App.settings['hdr_receipt_' + kind];
+  if (h) return `<div class="rcHead custom">${hdrFill(h)}${title ? `<div class="rcTitle">${esc(title)}</div>` : ''}</div>`;
   const s = App.settings;
   return `<div class="rcHead"><img src="${logoSrc()}" alt=""><div class="rcClinic">${esc(s.clinic_name || '')}</div>${title ? `<div class="rcTitle">${esc(title)}</div>` : ''}</div>`;
 }
@@ -112,7 +133,7 @@ function rxDocHTML({ enc = {}, rx, lab, patient, visit, doctor, opts }) {
   const ptRow = (l, v, cls = '') => `<div class="rxPt ${cls}"><span>${l}</span><b>${v || '—'}</b></div>`;
   return `<div class="doc rxDoc size-${size} ${preprinted ? 'preprinted' : ''}" style="--hs:${Number(s.rx_header_space_mm) || 60}mm">
     ${s.rx_watermark === '1' ? `<div class="wm"><img src="${logoSrc()}" alt=""><div>${esc(s.clinic_logo_text || '')}</div></div>` : ''}
-    ${preprinted ? '<div class="lhSpace"></div>' : clinicLetterhead()}
+    ${preprinted ? '<div class="lhSpace"></div>' : clinicLetterhead('rx', doctor || (rx?.doctor_id ? doctorById(rx.doctor_id) : null))}
     <div class="rxBody" style="font-family:${cssFont(s.rx_font)}, Vazirmatn, Tahoma, sans-serif;font-size:${cssNum(s.rx_font_size, 13.5, 8, 24)}px;font-weight:${s.rx_font_weight === 'bold' ? 700 : 400};line-height:${cssNum(s.rx_line_height, 1.6, 1, 3)}">
       <div class="rxPtBox">
         ${ptRow('نام مریض', esc(patient.full_name), 'w2')}${ptRow('ولد', esc(patient.father_name))}${ptRow('سن', esc(ageLabel(patient.birth_date)))}${ptRow('جنس', sexFa(patient.sex))}
@@ -132,14 +153,14 @@ function rxDocHTML({ enc = {}, rx, lab, patient, visit, doctor, opts }) {
       ${o.next_visit && enc.next_visit ? `<div class="rxNext"><b>مراجعه بعدی:</b> ${esc(fmtDate(enc.next_visit))}</div>` : ''}
       <div class="rxSign"><div>داکتر معالج: <b>${esc(dName)}</b></div><div class="sig">امضا و مهر</div></div>
     </div>
-    ${preprinted ? '' : clinicFooter(`<div class="rxFootNote">${esc(s.rx_footer || '')}</div>`)}
+    ${preprinted ? '' : clinicFooter(`<div class="rxFootNote">${esc(s.rx_footer || '')}</div>`, 'rx', doctor || (rx?.doctor_id ? doctorById(rx.doctor_id) : null))}
   </div>`;
 }
 
 // ---------- reception receipt ----------
 function visitReceiptHTML(v) {
   const d = doctorById(v.doctor_id);
-  return `<div class="doc receipt" style="--rw:${App.settings.receipt_width || 80}mm">${smallHead('رسید پذیرش و نوبت')}
+  return `<div class="doc receipt" style="--rw:${App.settings.receipt_width || 80}mm">${smallHead('رسید پذیرش و نوبت', 'reception')}
     <div class="turnBox"><small>نمبر نوبت</small><b>${v.turn_no || '—'}</b>${v.status === 'reserved' ? `<small>رزرو برای ${esc(fmtDate(v.visit_date))}${v.reserved_time ? ' ساعت ' + esc(v.reserved_time) : ''}</small>` : ''}</div>
     ${rcRow('کد مریض', `<span class="ltr">${esc(v.patient_code)}</span>`)}${rcRow('نام', esc(v.full_name))}${rcRow('ولد', esc(v.father_name || '—'))}
     ${rcRow('سن / جنس', `${esc(ageLabel(v.birth_date))} / ${sexFa(v.sex)}`)}${rcRow('خدمت', esc(v.service_name))}${d ? rcRow('داکتر', esc(doctorName(d))) : ''}
@@ -155,7 +176,7 @@ function visitReceiptHTML(v) {
 function saleReceiptHTML(sale, copy) {
   const patient = copy === 'patient';
   const items = sale.items || [];
-  return `<div class="doc receipt" style="--rw:${App.settings.receipt_width || 80}mm">${smallHead('رسید دواخانه — ' + (patient ? 'نسخه مریض' : 'نسخه دواخانه'))}
+  return `<div class="doc receipt" style="--rw:${App.settings.receipt_width || 80}mm">${smallHead('رسید دواخانه — ' + (patient ? 'نسخه مریض' : 'نسخه دواخانه'), 'pharmacy')}
     ${rcRow('کد فروش', `<span class="ltr">${esc(sale.sale_code)}</span>`)}${sale.rx_code ? rcRow('کد نسخه', `<span class="ltr">${esc(sale.rx_code)}</span>`) : ''}
     ${rcRow('مریض', esc(sale.patient_name || 'مشتری'))}${sale.patient_code ? rcRow('کد مریض', `<span class="ltr">${esc(sale.patient_code)}</span>`) : ''}${sale.doctor_name ? rcRow('داکتر', esc(sale.doctor_name)) : ''}
     ${rcRow('تاریخ', `<span class="ltr">${esc(fmtDateNum(sale.date))} ${esc(fmtTime(sale.created_at))}</span>`)}
@@ -176,7 +197,7 @@ function saleReceiptsHTML(sale) { return saleReceiptHTML(sale, 'pharmacy') + sal
 function labReceiptHTML(r, copy) {
   const patient = copy === 'patient';
   const tat = Math.max(...(r.items || []).map(i => 0), 0);
-  return `<div class="doc receipt" style="--rw:${App.settings.receipt_width || 80}mm">${smallHead('رسید لابراتوار — ' + (patient ? 'نسخه مریض' : 'نسخه لابراتوار'))}
+  return `<div class="doc receipt" style="--rw:${App.settings.receipt_width || 80}mm">${smallHead('رسید لابراتوار — ' + (patient ? 'نسخه مریض' : 'نسخه لابراتوار'), 'lab')}
     ${rcRow('کد لابراتوار', `<span class="ltr">${esc(r.lab_code)}</span>`)}${rcRow('کد مریض', `<span class="ltr">${esc(r.patient_code)}</span>`)}
     ${rcRow('نام', esc(r.full_name))}${rcRow('ولد', esc(r.father_name || '—'))}${rcRow('سن / جنس', `${esc(ageLabel(r.birth_date))} / ${sexFa(r.sex)}`)}
     ${r.doctor_name ? rcRow('داکتر', esc(r.doctor_name)) : ''}${rcRow('تاریخ', `<span class="ltr">${App.settings.lab_receipt_weekday !== '0' ? esc(weekday(r.received_at || r.created_at)) + ' ' : ''}${esc(fmtDateTimeNum(r.received_at || r.created_at))}</span>`)}
@@ -224,7 +245,7 @@ function labReportHTML(r) {
   const ageDays = ageParts(birth)?.days ?? null;
   const groups = new Map();
   for (const t of r.tests || []) {
-    const v = res.get(t.id); if (!v || v.value === null || v.value === '') continue;
+    const v = res.get(t.id); if (!v || v.value === null || v.value === '' || String(v.value).trim() === '*') continue;   // * = not needed
     // flag and normal range are taken from the CURRENT ranges of the result's kit, so edits to the ranges always apply
     let flag = v.flag, ref = v.ref;
     if (typeof resolveRange === 'function') { const rg = resolveRange(t, sex, ageDays); flag = computeFlag(t, v.value, rg); ref = refDisplay(t, rg) || v.ref || ''; }
@@ -250,7 +271,7 @@ function labReportHTML(r) {
       const side = sideOn ? g.rows.filter(x => x.t.side_column) : [], main = sideOn ? g.rows.filter(x => !x.t.side_column) : g.rows;
       const mainT = `<table class="rt2"><thead><tr><th style="width:36%">Test</th><th>Result</th><th>Unit</th><th>Reference range</th></tr></thead><tbody>${g.title ? `<tr class="pnl"><td colspan="4">${esc(g.title)}</td></tr>` : ''}${main.map(rowHTML).join('')}</tbody></table>`;
       if (!side.length) return mainT;
-      const sideT = `<table class="rt2 sideT"><thead><tr><th colspan="2">Differential</th></tr></thead><tbody>${side.map(({ t, v, flag }) => `<tr><td class="${colorNames ? 'n-' + cls(flag) : ''}">${esc(String(t.report_name || t.name).replace(/\s*%\s*$/, ''))}</td><td class="v ${cls(flag)}">${arrow(flag)}${esc(v.value)} ${esc(v.unit || t.unit || '')}</td></tr>`).join('')}</tbody></table>`;
+      const sideT = `<table class="rt2 sideT"><thead><tr><th colspan="2">${/urin/i.test(String(dept) + ' ' + (g.title || '')) ? 'Microscopic Examination' : 'Differential'}</th></tr></thead><tbody>${side.map(({ t, v, flag }) => `<tr><td class="${colorNames ? 'n-' + cls(flag) : ''}">${esc(String(t.report_name || t.name).replace(/\s*%\s*$/, ''))}</td><td class="v ${cls(flag)}">${arrow(flag)}${esc(v.value)} ${esc(v.unit || t.unit || '')}</td></tr>`).join('')}</tbody></table>`;
       return `<div class="withSide">${mainT}${sideT}</div>`;
     }).join('')}</div>`).join('');
   const fa = s.lab_patient_lang !== 'en';
@@ -268,20 +289,20 @@ function labReportHTML(r) {
       ${flags ? `<div class="span3">${flags}</div>` : `<div>${bc(r.lab_code, 20)}</div>`}</div>`;
   const signL = s.lab_sign_left || s.lab_signature || 'Lab Technician', signR = s.lab_sign_right || 'Lab in charge';
   return `<div class="doc labDoc labDoc2 size-A4 grid-${grid}" style="${vars};position:relative">
-    <table class="pageTable"><thead><tr><td>${clinicLetterhead()}<div class="docTitle">LABORATORY REPORT</div>${ptBox}</td></tr></thead>
+    <table class="pageTable"><thead><tr><td>${clinicLetterhead('lab')}<div class="docTitle">LABORATORY REPORT</div>${ptBox}</td></tr></thead>
     <tbody><tr><td class="lbf">${sec || '<p class="muted">No results.</p>'}
       ${r.report_note ? `<div class="rSec"><h3>Comment</h3><div class="commentBox">${esc(r.report_note)}</div></div>` : ''}
       ${s.lab_show_signature !== '0' ? `<div class="signRow"><div>${esc(signL)}${r.checked_by_name ? `<br><small>${esc(r.checked_by_name)}</small>` : ''}</div><div>${esc(signR)}${r.approved_by_name ? `<br><small>${esc(r.approved_by_name)}</small>` : ''}</div></div>` : ''}
-      ${s.lab_report_qr !== '0' && r.verify_key && ['approved', 'delivered'].includes(r.status) ? `<div class="qrBox">${qrSVG(`ACDB-VERIFY ${r.lab_code} ${r.verify_key}`)}<div><b>Verify</b><br><span class="ltr">${esc(r.lab_code)} · ${esc(r.verify_key)}</span><br><small>Scan or type this code in the clinic system to confirm the report is genuine.</small></div></div>` : ''}
+      ${s.lab_report_qr === '1' && r.verify_key && ['approved', 'delivered'].includes(r.status) ? `<div class="qrBox">${qrSVG(`ACDB-VERIFY ${r.lab_code} ${r.verify_key}`)}<div><b>Verify</b><br><span class="ltr">${esc(r.lab_code)} · ${esc(r.verify_key)}</span><br><small>Scan or type this code in the clinic system to confirm the report is genuine.</small></div></div>` : ''}
       ${s.lab_report_footer ? `<div class="labFootNote">${esc(s.lab_report_footer)}</div>` : ''}
       ${s.lab_show_print_time === '1' ? `<div class="docSub" style="margin-top:3mm">${esc(fmtDateTimeNum(new Date()))}</div>` : ''}</td></tr></tbody>
     <tfoot><tr><td><div class="footSpace"></div></td></tr></tfoot></table>
-    <div class="labFoot">${clinicFooter()}</div></div>`;
+    <div class="labFoot">${clinicFooter('', 'lab')}</div></div>`;
 }
 
 // ---------- generic payment receipt (central cashier, deposits, beds) ----------
 function payReceiptHTML({ title = 'رسید پرداخت', code, name, pcode, rows = [], amount = 0, method, due, deposit }) {
-  return `<div class="doc receipt" style="--rw:${App.settings.receipt_width || 80}mm">${smallHead(title)}
+  return `<div class="doc receipt" style="--rw:${App.settings.receipt_width || 80}mm">${smallHead(title, 'reception')}
     ${code ? rcRow('کد بل', `<span class="ltr">${esc(code)}</span>`) : ''}${pcode ? rcRow('کد مریض', `<span class="ltr">${esc(pcode)}</span>`) : ''}${name ? rcRow('نام', esc(name)) : ''}
     ${rows.map(([l, v]) => rcRow(esc(l), v)).join('')}
     ${rcRow('تاریخ', `<span class="ltr">${esc(fmtDateTimeNum(new Date()))}</span>`)}
