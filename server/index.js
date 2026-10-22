@@ -10,6 +10,7 @@ const dgram = require('dgram');
 const { ClinicDatabase } = require('./db');
 const { makeOps } = require('./ops');
 const { makeResources, allowed } = require('./resources');
+const { registerExtra } = require('./extra');
 
 const APP_ID = 'ACDB';
 const DISCOVERY_PORT = 41234;
@@ -166,14 +167,14 @@ async function createServer(opts = {}) {
   route('POST', '/api/delete/:res/:id', ({ user, params }) => { need(user, ...ROLES); return res$.remove(params.res, params.id, user); });
 
   // users (admin)
-  route('GET', '/api/users', ({ user }) => { need(user); return db.all('SELECT u.id, u.username, u.full_name, u.role, u.doctor_id, u.phone, u.active, u.must_change, u.last_login, u.created_at, d.name doctor_name FROM users u LEFT JOIN doctors d ON d.id=u.doctor_id ORDER BY u.id'); });
+  route('GET', '/api/users', ({ user }) => { need(user); return db.all('SELECT u.id, u.username, u.full_name, u.role, u.doctor_id, u.phone, u.active, u.must_change, u.no_finance, u.last_login, u.created_at, d.name doctor_name FROM users u LEFT JOIN doctors d ON d.id=u.doctor_id ORDER BY u.id'); });
   route('POST', '/api/users/save', ({ user, body, req }) => {
     need(user);
     if (!ROLES.includes(body.role)) throw new UserError('نقش نامعتبر');
     if (body.role === 'doctor' && !body.doctor_id) throw new UserError('برای کاربر داکتر، پروفایل داکتر را انتخاب کنید');
     if (body.id) {
       if (Number(body.id) === user.id && (body.role !== 'admin' || !body.active)) throw new UserError('نمی‌توانید نقش یا فعال بودن حساب خودتان را تغییر دهید');
-      db.update('users', body.id, { full_name: body.full_name || null, role: body.role, doctor_id: body.doctor_id || null, phone: body.phone || null, active: body.active ? 1 : 0 });
+      db.update('users', body.id, { full_name: body.full_name || null, role: body.role, doctor_id: body.doctor_id || null, phone: body.phone || null, active: body.active ? 1 : 0, no_finance: body.no_finance ? 1 : 0 }); sessionCache.clear();
       if (body.password) { if (String(body.password).length < 4) throw new UserError('رمز باید حداقل ۴ حرف باشد'); db.setPassword(body.id, body.password); db.run('UPDATE users SET must_change=1 WHERE id=?', [body.id]); }
       if (!body.active) { db.run('DELETE FROM sessions WHERE user_id=?', [body.id]); sessionCache.clear(); }
       audit(user, 'update', 'user', body.id, body.username, req); return body.id;
@@ -181,7 +182,7 @@ async function createServer(opts = {}) {
     if (!body.username || !body.password) throw new UserError('نام کاربری و رمز الزامی است');
     if (String(body.password).length < 4) throw new UserError('رمز باید حداقل ۴ حرف باشد');
     if (db.get('SELECT id FROM users WHERE username=?', [String(body.username).trim()])) throw new UserError('این نام کاربری قبلاً ثبت شده');
-    const id = db.createUser(body); audit(user, 'create', 'user', id, body.username + ' / ' + body.role, req); return id;
+    const id = db.createUser(body); if (body.no_finance) db.run('UPDATE users SET no_finance=1 WHERE id=?', [id]); audit(user, 'create', 'user', id, body.username + ' / ' + body.role, req); return id;
   });
   route('POST', '/api/users/delete/:id', ({ user, params, req }) => {
     need(user); if (Number(params.id) === user.id) throw new UserError('نمی‌توانید حساب خودتان را حذف کنید');
@@ -382,6 +383,8 @@ async function createServer(opts = {}) {
     return sum;
   });
 
+  const extra = registerExtra({ route, need, db, ops, audit, bus, dataDir, ROLES, UserError });
+
   // ---------------- HTTP server ----------------
   async function handle(req, res) {
     const url = new URL(req.url, 'http://x');
@@ -394,6 +397,7 @@ async function createServer(opts = {}) {
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="clinic-backup-${ops.today()}.sqlite"`, 'Content-Length': buf.length });
       return res.end(buf);
     }
+    if (url.pathname.startsWith('/api/patient-docs/file/')) return extra.rawDoc(url, authUser(req, url), res);
     if (url.pathname.startsWith('/api/')) {
       const r = routes.find(x => x.method === req.method && x.re.test(url.pathname));
       if (!r) return send(res, 404, { ok: false, error: 'Not found' });

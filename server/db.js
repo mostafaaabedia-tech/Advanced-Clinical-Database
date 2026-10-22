@@ -6,6 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const initSqlJs = require('sql.js/dist/sql-wasm.js');
 const { TABLES, VIEWS, SCHEMA_VERSION } = require('./schema');
+const { TABLES_EXTRA } = require('./extra');
 const seed = require('./seed');
 
 function hashPassword(password, salt) {
@@ -51,6 +52,7 @@ class ClinicDatabase {
   prepareDb() {
     this.db.exec('PRAGMA foreign_keys = ON;');
     this.db.exec(TABLES);
+    this.db.exec(TABLES_EXTRA);
     this.migrate();
     this.db.exec(VIEWS);
     seed.ensureDefaults(this);
@@ -145,6 +147,9 @@ class ClinicDatabase {
     add('lab_results', 'kit_id', 'INTEGER');
     // v1.3: medicine taken on selected dates; withdrawals with type, person and purchase factor
     add('prescription_items', 'dates', 'TEXT');
+    // v1.4
+    add('medicines', 'controlled', 'INTEGER'); add('medicines', 'ved', 'TEXT'); add('purchases', 'po_id', 'INTEGER'); add('users', 'no_finance', 'INTEGER');
+    add('lab_tests', 'delta_pct', 'REAL'); add('lab_requests', 'auto_verified', 'INTEGER');
     for (const [c, d] of [['person', 'TEXT'], ['purchase_id', 'INTEGER'], ['purchase_payment_id', 'INTEGER'], ['factor_no', 'TEXT']]) add('withdrawals', c, d);
     if (v < SCHEMA_VERSION) {
       if (v >= 1 && v < 2) {
@@ -190,7 +195,7 @@ class ClinicDatabase {
   publicUser(u) {
     if (!u) return null;
     const d = u.doctor_id ? this.get('SELECT id, name, title FROM doctors WHERE id=?', [u.doctor_id]) : null;
-    return { id: u.id, username: u.username, full_name: u.full_name, role: u.role, doctor_id: u.doctor_id || null, doctor: d, must_change: u.must_change };
+    return { id: u.id, username: u.username, full_name: u.full_name, role: u.role, doctor_id: u.doctor_id || null, doctor: d, must_change: u.must_change, no_finance: u.no_finance ? 1 : 0 };
   }
   setPassword(userId, password) {
     const { hash, salt } = hashPassword(password);

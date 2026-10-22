@@ -1,5 +1,6 @@
 // Domain operations — every multi-table change happens here inside one transaction.
 'use strict';
+const crypto = require('crypto');
 
 const r2 = (x) => Math.round((Number(x) || 0) * 100) / 100;
 const n = (x, d = 0) => { const v = Number(x); return isFinite(v) ? v : d; };
@@ -422,6 +423,8 @@ function makeOps(db, bus) {
     for (const f of F) if (f in m) row[f] = str(m[f]);
     for (const f of N) if (f in m) row[f] = Math.max(0, n(m[f]));
     if ('active' in m) row.active = m.active ? 1 : 0;
+    if ('controlled' in m) row.controlled = m.controlled ? 1 : 0;
+    if ('ved' in m) row.ved = ['V', 'E', 'D'].includes(m.ved) ? m.ved : null;
     if ('code' in m && m.code !== '' && m.code != null) {
       row.code = Math.floor(n(m.code)); if (!row.code) fail('کد دوا باید عدد باشد');
       const dup = db.get('SELECT id, name FROM medicines WHERE code=? AND id<>?', [row.code, m.id || 0]);
@@ -646,6 +649,7 @@ function makeOps(db, bus) {
     if (!r0) fail('درخواست آزمایش با این کد پیدا نشد');
     const r = labRequestsFull([db.get('SELECT * FROM v_lab_requests WHERE id=?', [r0.id])])[0];
     r.patient = db.get('SELECT * FROM patients WHERE id=?', [r.patient_id]);
+    r.verify_key = crypto.createHmac('sha256', String(setting('server_id', 'acdb'))).update(String(r.lab_code)).digest('hex').slice(0, 8).toUpperCase();
     r.payments = db.all('SELECT * FROM lab_payments WHERE request_id=? ORDER BY id', [r.id]);
     // tests to fill: panels expand to their components
     const testIds = [];
@@ -794,7 +798,7 @@ function makeOps(db, bus) {
       const F = ['code', 'name', 'name_fa', 'sample', 'result_type', 'options', 'unit', 'ref_text', 'formula',
         'weekdays', 'sample_amount', 'tube', 'tube_sep', 'loinc', 'machine_code', 'sendout_lab', 'default_answer', 'ready_answers', 'sex_only', 'description', 'report_name'];
       const N = ['ref_low', 'ref_high', 'critical_low', 'critical_high', 'decimals', 'num_code', 'department_id', 'tat_hours',
-        'tat_days', 'price_ins', 'sendout_cost', 'possible_low', 'possible_high', 'active_kit_id', 'sort'];
+        'tat_days', 'price_ins', 'sendout_cost', 'possible_low', 'possible_high', 'active_kit_id', 'sort', 'delta_pct'];
       const row = {};
       for (const f of F) if (f in t) row[f] = str(t[f]);
       for (const f of N) if (f in t) row[f] = t[f] === '' || t[f] == null ? null : n(t[f]);
@@ -1290,7 +1294,7 @@ function makeOps(db, bus) {
     add('SELECT date d, SUM(net) s FROM purchases WHERE date BETWEEN ? AND ? GROUP BY d', (o, r) => o.purchases = r.s);
     add("SELECT DATE(created_at) d, SUM(amount) s FROM sale_payments WHERE DATE(created_at) BETWEEN ? AND ? AND IFNULL(method,'')<>'deposit' GROUP BY d", (o, r) => o.ph_cash = r.s);
     add("SELECT DATE(created_at) d, SUM(amount) s FROM admission_payments WHERE DATE(created_at) BETWEEN ? AND ? AND IFNULL(method,'')<>'deposit' GROUP BY d", (o, r) => o.ipd = r.s);
-    add('SELECT date d, SUM(amount) s FROM purchase_payments WHERE date BETWEEN ? AND ? GROUP BY d', (o, r) => o.supplier_paid = r.s);
+    add("SELECT date d, SUM(amount) s FROM purchase_payments WHERE date BETWEEN ? AND ? AND IFNULL(method,'')<>'return' GROUP BY d", (o, r) => o.supplier_paid = r.s);
     add('SELECT date d, pharmacy_sales s, lab_income l FROM legacy_daily WHERE date BETWEEN ? AND ?', (o, r) => { o.legacy_ph = r.s; o.legacy_lab = r.l; });
     const out = [...map.values()].sort((a, b) => a.date < b.date ? -1 : 1);
     for (const o of out) {
@@ -1429,7 +1433,7 @@ function makeOps(db, bus) {
     alternatives, paySale, addDeposit, depositBalance, cashierPay, cashierPending, patientAccount, cashierDay, cashClose,
     labItemMove, applyLabConsumption, admit, transferBed, addAdmissionCharge, dischargeAdmission, payAdmission, admissionFull, ipdBoard,
     reorderSuggestions, doctorLoad, saveDoctorSchedule, queueDisplay, callVisit,
-    saveLabKit, applyRanges, labRepeatCheck, labStats, labDoctorIncome, labTestHistory, labPrevResults, recalcLabTotals
+    saveLabKit, applyRanges, labRepeatCheck, labStats, labDoctorIncome, labTestHistory, labPrevResults, recalcLabTotals, recomputePurchase
   };
 }
 

@@ -335,12 +335,12 @@ Pages.patients = {
     const load = async () => {
       const r = await API.list('patients', { q: $('#p_q', view).value.trim(), limit, count: 1 });
       $('#pBody', view).innerHTML = r.rows.map(p => `<tr class="clickable" data-id="${p.id}"><td class="codeTag">${esc(p.code)}</td><td><b>${esc(p.full_name)}</b></td><td>${esc(p.father_name || '')}</td><td>${sexFa(p.sex)}</td><td>${esc(ageLabel(p.birth_date))}</td>
-        <td class="ltr">${esc(p.phone || '')}</td><td>${esc(p.address || '')}</td><td>${fmtDate(p.created_at)}</td><td class="nowrap">${isRole('reception') ? `<button class="btn sm" data-act="visit" data-id="${p.id}">${icon('ticket', 14)} نوبت</button> ` : ''}<button class="btn sm" data-act="edit" data-id="${p.id}">${icon('edit', 14)}</button></td></tr>`).join('') || emptyRow(9);
+        <td class="ltr">${esc(p.phone || '')}</td><td>${esc(p.address || '')}</td><td>${fmtDate(p.created_at)}</td><td class="nowrap">${isRole('reception') ? `<button class="btn sm" data-act="visit" data-id="${p.id}">${icon('ticket', 14)} نوبت</button> ` : ''}<button class="btn sm" data-act="edit" data-id="${p.id}">${icon('edit', 14)}</button> <button class="btn sm ghost" data-act="card" data-id="${p.id}" title="کارت مریض">${icon('barcode', 14)}</button></td></tr>`).join('') || emptyRow(9);
       $('#pCount', view).textContent = `${r.rows.length} از ${r.total}`;
     };
     $('#p_q', view).addEventListener('input', debounce(() => { limit = 100; load(); }, 300));
     view.addEventListener('click', (e) => { const tr = e.target.closest('tr.clickable'); if (tr && !e.target.closest('button')) { const id = Number(tr.dataset.id); isRole('doctor') ? openPatientFile(id) : openPatientBasic(id); } });
-    actions(view, { more: () => { limit += 200; load(); }, new: () => editPatient(null, load), edit: async (b) => editPatient(await API.one('patients', b.dataset.id), load), visit: (b) => go('reception', { patient_id: Number(b.dataset.id) }) });
+    actions(view, { more: () => { limit += 200; load(); }, new: () => editPatient(null, load), edit: async (b) => editPatient(await API.one('patients', b.dataset.id), load), visit: (b) => go('reception', { patient_id: Number(b.dataset.id) }), card: async (b) => printPatientCard(await API.get('/api/patient-basic/' + b.dataset.id)) });
     await load();
   }
 };

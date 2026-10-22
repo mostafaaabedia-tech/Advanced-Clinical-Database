@@ -99,6 +99,8 @@ with sync_playwright() as p:
   crit = lb.evaluate("[...document.querySelectorAll('tr.crit td.nm')].map(x => x.textContent.trim().slice(0, 20))")
   ok(any('Glucose' in c or 'GLU' in c or 'Fasting' in c for c in crit), 'FBS 480 marked critical (kit range): ' + ', '.join(crit))
   lb.click('[data-act=saveRes][data-st=approved]'); lb.wait_for_timeout(1500)
+  if lb.query_selector('#cc_ok'):   # v1.4: critical results ask who was told
+    checks.append('✓ critical value call dialog shown'); lb.click('#cc_ok'); lb.wait_for_timeout(800)
   lb.click('[data-act=report]'); lb.wait_for_timeout(1500); doc_shot(lb, 'f3-07-lab-report')
   rep = lb.evaluate("document.querySelector('.docPreview')?.innerText || ''")
   ok('Differential' in rep and 'Fast' in rep and 'Anemia' in rep, 'report has differential side column, Fast box and clinical notes')

@@ -26,6 +26,13 @@ const NAV = [
   ['med-sales', 'فروش و مفاد هر دوا', 'chart', ['stock', 'pharmacy'], 'stock'],
   ['reorder', 'سفارش خرید (کمبودها)', 'cart', ['stock', 'pharmacy'], 'stock'],
   ['import', 'ورود اطلاعات از اکسل', 'excel', ['stock'], 'stock'],
+  ['expiry', 'انقضا و دواهای بی‌حرکت', 'alert', ['stock', 'pharmacy'], 'stock'],
+  ['controlled', 'دفتر دواهای کنترل شده', 'shield', ['stock', 'pharmacy'], 'stock'],
+  ['abc', 'تحلیل ABC و VED', 'chart', ['stock', 'pharmacy'], 'stock'],
+  ['stock-count', 'شمارش فزیکی انبار', 'list', ['stock'], 'stock'],
+  ['po', 'سفارش خرید (PO)', 'truck', ['stock'], 'stock'],
+  ['dept-requests', 'درخواست از انبار', 'box', ['stock', 'lab', 'pharmacy', 'reception', 'doctor'], 'stock'],
+  ['compare', 'گزارش مقایسه‌ای', 'trend', ['stock'], 'stock'],
 
   ['reception', 'پذیرش و نوبت', 'ticket', ['reception'], 'reception'],
   ['visits', 'صف امروز و لیست پذیرش', 'list', ['reception'], 'reception'],
@@ -39,6 +46,11 @@ const NAV = [
   ['rc-month', 'حساب ماهوار لابراتوار', 'trend', ['reception'], 'reception'],
   ['dr-daily', 'آمار روزانه داکتران و نوبت‌ها', 'chart', ['reception'], 'reception'],
   ['qdisplay', 'صفحه نمایش نوبت (TV)', 'tv', ['reception', 'doctor'], 'reception'],
+  ['reminders', 'یادآوری مریضان (واتس‌اپ)', 'send', ['reception', 'doctor'], 'reception'],
+
+  ['staff', 'کارمندان و معاش', 'users', ['reception'], 'staff'],
+  ['attendance', 'حاضری و رخصتی', 'clock', ['reception'], 'staff'],
+  ['payroll', 'معاشات و برداشت از معاش', 'money', ['reception'], 'staff'],
 
   ['dr-queue', 'صف مریضان', 'list', ['doctor'], 'doctor'],
   ['encounter', 'ویزیت، نسخه و آزمایش', 'rx', ['doctor'], 'doctor'],
@@ -61,12 +73,17 @@ const NAV = [
   ['lab-reports', 'آمار مراجعین و درآمد داکتران', 'chart', ['lab', 'stock', 'reception'], 'lab'],
   ['lab-setup', 'انواع پذیرش و داکتران معرف', 'list', ['lab', 'reception'], 'lab'],
   ['lab-sales', 'فروش لابراتوار', 'chart', ['lab'], 'lab'],
+  ['lab-qc', 'کنترل کیفیت (QC) و بحرانی‌ها', 'shield', ['lab'], 'lab'],
+  ['lab-tat', 'زمان جوابدهی (TAT)', 'clock', ['lab', 'reception'], 'lab'],
+  ['verify', 'تأیید اصالت راپور', 'check', ['lab', 'doctor', 'reception', 'pharmacy', 'stock'], 'lab'],
 
   ['local', 'تنظیمات این کمپیوتر', 'settings', ALL_ROLES, 'local']
 ];
-const NAV_GROUPS = { admin: 'مدیریت', stock: 'انبار و حسابات', reception: 'پذیرش', doctor: 'داکتر', pharmacy: 'دواخانه', lab: 'لابراتوار', local: '' };
+const NAV_GROUPS = { admin: 'مدیریت', staff: 'کارمندان، حاضری و معاشات', stock: 'انبار و حسابات', reception: 'پذیرش', doctor: 'داکتر', pharmacy: 'دواخانه', lab: 'لابراتوار', local: '' };
 const HOME = { admin: 'admin-dash', stock: 'stock-dash', reception: 'reception', doctor: 'dr-queue', pharmacy: 'rx-inbox', lab: 'lab-inbox' };
-const canSee = (page) => { const ns = NAV.filter(x => x[0] === page); return !ns.length || App.user?.role === 'admin' || ns.some(n => n[3].includes(App.user?.role)); };
+// users marked «no finance» do not see profit / monthly money reports
+const FINANCE_PAGES = ['monthly', 'month-account', 'compare', 'med-sales', 'rc-month', 'ph-month'];
+const canSee = (page) => { if (App.user?.no_finance && FINANCE_PAGES.includes(page)) return false; const ns = NAV.filter(x => x[0] === page); return !ns.length || App.user?.role === 'admin' || ns.some(n => n[3].includes(App.user?.role)); };
 const isRole = (...r) => App.user && (App.user.role === 'admin' || r.includes(App.user.role));
 
 // ---------- station ----------
@@ -97,12 +114,13 @@ function applyBranding() {
 
 function renderNav() {
   const role = App.user.role;
-  const items = NAV.filter(n => role === 'admin' || n[3].includes(role));
-  if (role !== 'admin') items.sort((a, b) => (a[4] === 'local') - (b[4] === 'local') || (b[4] === role) - (a[4] === role));
+  const items = NAV.filter(n => (role === 'admin' || n[3].includes(role)) && !(App.user.no_finance && FINANCE_PAGES.includes(n[0])));
+  const rank = (n) => n[4] === 'local' ? 3 : n[4] === 'staff' ? 2 : n[4] === role ? 0 : 1;
+  if (role !== 'admin') items.sort((a, b) => rank(a) - rank(b));
   let lastGroup = null, html = '';
   for (const n of items) {
-    const g = role === 'admin' ? n[4] : (n[4] === 'local' ? 'local' : role);
-    if (g !== lastGroup) { if (NAV_GROUPS[g] && (role === 'admin' || g === 'local')) html += `<div class="navGroup">${NAV_GROUPS[g]}</div>`; else if (g === 'local') html += '<div class="navGroup"></div>'; lastGroup = g; }
+    const g = role === 'admin' ? n[4] : (n[4] === 'local' ? 'local' : n[4] === 'staff' ? 'staff' : role);
+    if (g !== lastGroup) { if (NAV_GROUPS[g] && (role === 'admin' || g === 'local' || g === 'staff')) html += `<div class="navGroup">${NAV_GROUPS[g]}</div>`; else if (g === 'local') html += '<div class="navGroup"></div>'; lastGroup = g; }
     html += `<button class="navItem" data-page="${n[0]}">${icon(n[2])}<span>${n[1]}</span><span class="cnt hidden" data-cnt="${n[0]}"></span></button>`;
   }
   const st = STATIONS[App.station] || null;
@@ -123,6 +141,7 @@ async function go(page, params = {}) {
   try { await Pages[page].render(fresh, params); }
   catch (e) { errToast(e); fresh.innerHTML = `<div class="card"><h2>خطا</h2><p class="muted">${esc(e.message)}</p></div>`; }
   applyFolds(fresh);
+  if (typeof countUp === 'function') countUp(fresh);
   refreshCounts();
 }
 const reloadPage = debounce(() => { if (App.page && Pages[App.page]) go(App.page, App.params); }, 250);
@@ -283,9 +302,10 @@ const globalSearch = debounce(async () => {
 
 async function openPatientBasic(id) {
   const p = await API.get('/api/patient-basic/' + id);
-  modal({ title: 'مریض ' + p.code, size: 'wide', body: `<div class="ptHead">${patientHeadHTML(p)}</div>
+  const pm = modal({ title: 'مریض ' + p.code, size: 'wide', body: `<div class="ptHead">${patientHeadHTML(p)}${typeof patientToolsHTML === 'function' ? `<div class="bar">${patientToolsHTML(p, 'basic')}</div>` : ''}</div>
     <div class="tableWrap" style="margin-top:12px"><table class="t"><thead><tr><th>تاریخ</th><th>رسید</th><th>خدمت</th><th>داکتر</th><th>نوبت</th><th>وضعیت</th><th>فیس</th></tr></thead>
     <tbody>${p.visits.map(v => `<tr><td>${fmtDate(v.visit_date)}</td><td class="codeTag">${esc(v.visit_no)}</td><td>${esc(v.service_name)}</td><td>${esc(v.doctor_name || '—')}</td><td class="c">${v.turn_no || ''}</td><td>${statusPill(VISIT_STATUS, v.status)}</td><td>${money(v.net)}</td></tr>`).join('') || emptyRow(7)}</tbody></table></div>` });
+  if (typeof bindPatientTools === 'function') bindPatientTools(pm.el, p);
 }
 function patientHeadHTML(p) {
   return `<div class="ptAvatar ${p.sex === 'F' ? 'f' : ''}">${esc((p.full_name || '?').charAt(0))}</div>

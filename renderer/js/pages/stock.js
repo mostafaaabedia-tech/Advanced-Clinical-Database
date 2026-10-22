@@ -109,6 +109,8 @@ function medicineDialog(m, after) {
     <label class="field"><span>قیمت فروش</span><input name="sell_price" type="number" step="any" id="md_sell" value="${esc(m.sell_price || 0)}"></label>
     ${isNew ? `<label class="field"><span>موجودی اولیه</span><input name="opening_qty" type="number" value="0"></label><label class="field"><span>تاریخ انقضا</span><input name="opening_expiry" type="month"></label>` : ''}
     <label class="check" style="align-self:end"><input type="checkbox" name="active" ${m.active ? 'checked' : ''}> فعال</label>
+    <label class="field"><span>VED (اهمیت دوا)</span><select name="ved">${opt([['V', 'V — حیاتی'], ['E', 'E — ضروری'], ['D', 'D — مطلوب']], m.ved, { empty: '—' })}</select></label>
+    <label class="check" style="align-self:end"><input type="checkbox" name="controlled" ${m.controlled ? 'checked' : ''}> دوای کنترل شده (نارکوتیک / روانی — ثبت در دفتر)</label>
     <label class="field full"><span>یادداشت</span><input name="notes" value="${esc(m.notes || '')}"></label></div>
     <div class="chips" style="margin-top:8px">${[10, 15, 20, 25, 30, 40, 50].map(p => `<button type="button" class="chip" data-mk="${p}">${p}٪</button>`).join('')}</div>
     ${datalist('mdForms', listSetting('rx_forms'))}${datalist('mdUnits', listSetting('medicine_units'))}${datalist('mdCats', listSetting('medicine_categories'))}`,
@@ -219,7 +221,7 @@ async function openPurchase(id, after, prefill) {
     <label class="field" style="margin-top:10px"><span>یادداشت</span><input id="phNotes" value="${esc(p.notes || '')}"></label>
     ${id ? `<div class="secTitle">${icon('money', 15)} پرداخت‌ها و اقساط</div><div id="phPays"></div>` : ''}
     ${datalist('supList', sups.map(s => s.name))}`,
-    foot: `<button class="btn primary" id="ph_ok">${icon('check')} ذخیره فاکتور</button>${id ? `<button class="btn success" id="ph_pay">${icon('money')} ثبت پرداخت / قسط</button><button class="btn" id="ph_pr">${icon('print')} چاپ</button><button class="btn dangerText" id="ph_del">${icon('trash')} حذف</button>` : ''}<button class="btn" data-x>بستن</button>` });
+    foot: `<button class="btn primary" id="ph_ok">${icon('check')} ذخیره فاکتور</button>${id ? `<button class="btn success" id="ph_pay">${icon('money')} ثبت پرداخت / قسط</button><button class="btn" id="ph_pr">${icon('print')} چاپ</button><button class="btn" id="ph_ret">${icon('refresh')} برگشت دوا به کمپنی</button><button class="btn dangerText" id="ph_del">${icon('trash')} حذف</button>` : ''}<button class="btn" data-x>بستن</button>` });
   const rowsEl = $('#phRows', m.el);
   const sell = (it) => { const s = (Number(it.buy_price) || 0) * (1 + (Number(it.markup_pct) || 0) / 100); return s >= 10 ? Math.ceil(s) : Math.round(s * 10) / 10; };
   const draw = () => {
@@ -273,6 +275,7 @@ async function openPurchase(id, after, prefill) {
     };
     $('#ph_pay', m.el).onclick = () => paymentDialog(id, async () => { Object.assign(p, await API.get('/api/purchases/' + id)); drawPays(); calc(); after && after(); });
     $('#ph_pr', m.el).onclick = async () => previewDoc(purchaseDocHTML(await API.get('/api/purchases/' + id)), { title: p.ref_no });
+    $('#ph_ret', m.el).onclick = () => supplierReturnDialog(id, async () => { Object.assign(p, await API.get('/api/purchases/' + id)); drawPays(); calc(); after && after(); });
     $('#ph_del', m.el).onclick = async () => { if (await confirmDlg(`فاکتور ${esc(p.ref_no)} کاملاً حذف شود؟ موجودی دواهای آن هم کم می‌شود.`, { danger: true, okText: 'حذف' })) { try { await API.post('/api/purchases/delete/' + id); toast('حذف شد', 'good'); m.close(); after && after(); } catch (e) { errToast(e); } } };
   }
   $('[data-x]', m.el).onclick = m.close;

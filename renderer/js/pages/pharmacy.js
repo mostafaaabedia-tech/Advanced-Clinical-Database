@@ -141,12 +141,14 @@ Pages.pos = {
       const short = st.lines.filter(l => l.on && l.med && l.qty > l.med.stock);
       if (short.length && App.settings.allow_negative_stock !== '1') throw new Error(`موجودی کافی نیست: ${short.map(l => `${l.med.name} (موجود ${fmtNum(l.med.stock)})`).join('، ')} — تعداد را کم کنید یا تیک آن را بردارید.`);
       if (short.length && !(await confirmDlg(`موجودی ${short.map(l => esc(l.med.name)).join('، ')} کافی نیست. ادامه می‌دهید؟`))) return;
+      const ctrl = st.lines.filter(l => l.on && l.med && l.qty > 0 && l.med.controlled);
+      if (ctrl.length && !st.rx && !(await confirmDlg(`${icon('alert', 15)} دوای کنترل شده (${ctrl.map(l => esc(l.med.name)).join('، ')}) بدون نسخه داکتر فروخته می‌شود و در دفتر دواهای کنترل شده ثبت می‌شود. ادامه می‌دهید؟`, { danger: true }))) return;
       const sale = await API.post('/api/sales/create', { prescription_id: st.rx?.id, patient_name: st.rx ? undefined : $('#ptName', view).value, items,
         discount_pct: $('#dAmt', view).value === '' ? $('#dPct', view).value : undefined, discount: $('#dAmt', view).value === '' ? undefined : $('#dAmt', view).value,
         paid: $('#paid', view).value, pay_method: $('#pm', view).value, note: $('#note', view).value });
       toast(central && sale.balance > 0.001 ? `فروش ${sale.sale_code} ثبت شد — ${money(sale.balance)} ${currency()} در صندوق پذیرش پرداخت شود` : `فروش ${sale.sale_code} ثبت شد — ${money(sale.net)} ${currency()}`, 'good');
       if (print) await printDoc(saleReceiptsHTML(sale), { size: 'receipt', title: sale.sale_code });
-      else previewDoc(saleReceiptsHTML(sale), { size: 'receipt', title: sale.sale_code });
+      else if (typeof salePreview === 'function') salePreview(sale); else previewDoc(saleReceiptsHTML(sale), { size: 'receipt', title: sale.sale_code });
       go('pos');
     });
     $('#rxCode', view).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); loadRx($('#rxCode', view).value).catch(errToast); } });
@@ -180,7 +182,7 @@ Pages.sales = {
     };
     $$('#s_from, #s_to, #s_kind', view).forEach(el => el.addEventListener('change', load)); $('#s_q', view).addEventListener('input', debounce(load, 300));
     actions(view, {
-      view: async (b) => { const s = await API.get('/api/sales/' + b.dataset.id); previewDoc(saleReceiptsHTML(s), { size: 'receipt', title: s.sale_code }); },
+      view: async (b) => { const s = await API.get('/api/sales/' + b.dataset.id); if (typeof salePreview === 'function') return salePreview(s); previewDoc(saleReceiptsHTML(s), { size: 'receipt', title: s.sale_code }); },
       ret: async (b) => returnDialog(Number(b.dataset.id), load),
       pay: async (b) => { const a = await promptDlg('دریافت باقی فروش', { label: 'مبلغ (منفی = بازپرداخت)', value: b.dataset.bal, type: 'number' }); if (a) { await API.post('/api/sales/pay/' + b.dataset.id, { amount: Number(a), method: 'cash' }); toast('ثبت شد', 'good'); load(); } },
       csv: () => exportCSV('pharmacy-sales', rows, [['sale_code', 'کد فروش'], ['date', 'تاریخ'], ['rx_code', 'کد نسخه'], ['patient_name', 'مریض'], ['subtotal', 'جمع'], ['discount', 'تخفیف'], ['net', 'خالص'], ['returned', 'برگشت'], ...(seeProfit ? [['cost', 'قیمت تمام شد'], ['profit', 'مفاد']] : []), ['seller', 'فروشنده']])
@@ -233,9 +235,9 @@ Pages['ph-daily'] = {
 };
 // withdrawal types of each section
 const WD_KINDS = {
-  pharmacy: [['personal', 'برداشت شخصی'], ['factor', 'پرداخت فاکتور (کمپنی)'], ['person', 'برای شخص (معاش، قرض…)'], ['business', 'سایر مصارف']],
-  lab: [['personal', 'برداشت شخصی'], ['external', 'معاینات بیرونی (آزمایش ارسالی)'], ['business', 'سایر']],
-  reception: [['personal', 'برداشت شخصی'], ['business', 'سایر']]
+  pharmacy: [['personal', 'برداشت شخصی'], ['factor', 'پرداخت فاکتور (کمپنی)'], ['person', 'برای شخص (معاش، قرض…)'], ['salary', 'معاش / پیش‌پرداخت کارمند'], ['business', 'سایر مصارف']],
+  lab: [['personal', 'برداشت شخصی'], ['external', 'معاینات بیرونی (آزمایش ارسالی)'], ['salary', 'معاش / پیش‌پرداخت کارمند'], ['business', 'سایر']],
+  reception: [['personal', 'برداشت شخصی'], ['salary', 'معاش / پیش‌پرداخت کارمند'], ['business', 'سایر']]
 };
 const wdKindName = (sec, k) => (WD_KINDS[sec] || []).concat([['business', 'عادی'], ['personal', 'شخصی']]).find(x => x[0] === k)?.[1] || k || 'عادی';
 // sections a station may take money from

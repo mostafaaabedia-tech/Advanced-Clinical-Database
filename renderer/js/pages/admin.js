@@ -90,7 +90,8 @@ Pages.users = {
         <label class="field" id="us_drBox"><span>پروفایل داکتر</span><select name="doctor_id">${opt(App.doctors.map(d => [d.id, doctorName(d)]), u.doctor_id, { empty: '—' })}</select></label>
         <label class="field"><span>تلفن</span><input name="phone" class="ltr" value="${esc(u.phone || '')}"></label>
         <label class="field"><span>${u.id ? 'رمز جدید (اختیاری)' : 'رمز عبور <em>*</em>'}</span><input name="password" type="password"></label>
-        <label class="check"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}> فعال</label></div>`,
+        <label class="check"><input type="checkbox" name="active" ${u.active ? 'checked' : ''}> فعال</label>
+        <label class="check"><input type="checkbox" name="no_finance" ${u.no_finance ? 'checked' : ''}> بدون دسترسی به گزارش‌های مالی (مفاد، حساب ماهوار، مقایسه)</label></div>`,
         foot: `<button class="btn primary" id="us_ok">ذخیره</button><button class="btn" data-x>انصراف</button>` });
       const tog = () => $('#us_drBox', m.el).classList.toggle('hidden', $('#us_role', m.el).value !== 'doctor'); $('#us_role', m.el).onchange = tog; tog();
       $('[data-x]', m.el).onclick = m.close;
@@ -166,7 +167,7 @@ Pages.settings = {
     const s = App.settings; const po = JSON.parse(s.rx_default_print || '{}');
     const L = (k, label, rows = 6) => `<label class="field"><span>${label} <span class="hint">(هر سطر یک مورد)</span></span><textarea name="${k}" rows="${rows}">${esc(s[k] || '')}</textarea></label>`;
     view.innerHTML = `<div class="pageHead"><div><h1>تنظیمات و سرخط نسخه</h1><p>این تنظیمات برای همه ایستگاه‌ها اعمال می‌شود.</p></div><div class="toolbar"><button class="btn" data-act="preview">${icon('eye')} پیش‌نمایش نسخه</button><button class="btn primary" data-act="save">${icon('check')} ذخیره تنظیمات</button></div></div>
-      <div class="tabs" id="stT"><button class="on" data-t="clinic">کلینیک و سرخط</button><button data-t="rx">نسخه و رسید</button><button data-t="codes">کدها و نوبت</button><button data-t="stock">دواخانه و انبار</button><button data-t="lab">راپور لابراتوار</button><button data-t="cash">صندوق و بخش‌ها</button><button data-t="colors">رنگ ایستگاه‌ها</button><button data-t="lists">لیست‌ها</button></div>
+      <div class="tabs" id="stT"><button class="on" data-t="clinic">کلینیک و سرخط</button><button data-t="rx">نسخه و رسید</button><button data-t="codes">کدها و نوبت</button><button data-t="stock">دواخانه و انبار</button><button data-t="lab">راپور لابراتوار</button><button data-t="cash">صندوق و بخش‌ها</button><button data-t="colors">رنگ ایستگاه‌ها</button><button data-t="lists">لیست‌ها</button><button data-t="v14">کارمندان، پیام‌ها و کیفیت</button></div>
       <form id="stF" autocomplete="off">
       <div class="card" data-p="clinic"><div class="formGrid">
         <label class="field span2"><span>نام کلینیک</span><input name="clinic_name" value="${esc(s.clinic_name || '')}"></label><label class="field"><span>نام انگلیسی</span><input name="clinic_name_en" class="en" value="${esc(s.clinic_name_en || '')}"></label>
@@ -247,6 +248,19 @@ Pages.settings = {
         ${Object.entries(STATIONS).map(([k, st]) => `<label class="field"><span>${esc(st.name)}</span><span class="bar"><input type="color" name="color_${k}" data-def="${st.color}" value="${esc(s['color_' + k] || st.color)}"><button type="button" class="btn sm" data-reset="${k}">پیش‌فرض</button></span></label>`).join('')}</div></div>
       <datalist id="fontList">${PRINT_FONTS.map(f => `<option value="${esc(f)}">`).join('')}</datalist>
       <div class="card hidden" data-p="lists"><div class="grid g3">${L('rx_forms', 'شکل دواها')}${L('rx_doses', 'مقدار هر بار (Dose)')}${L('rx_frequencies', 'دفعات مصرف (English: 1 / day …)')}${L('rx_timings', 'زمان مصرف')}${L('rx_units', 'واحد قوت')}${L('rx_routes', 'طریقه مصرف')}${L('rx_duration_units', 'واحد مدت', 3)}${L('expense_categories', 'کتگوری مصارف')}${L('medicine_categories', 'کتگوری دواها')}${L('medicine_units', 'واحد فروش دوا')}${L('doctor_work_types', 'نوع کار داکتران')}${L('lab_units', 'واحدهای لابراتوار')}${L('lab_discount_reasons', 'دلایل تخفیف لابراتوار')}</div></div>
+      <div class="card hidden" data-p="v14"><div class="secTitle">کارمندان و حاضری</div><div class="formGrid">
+        <label class="field"><span>دقیقه‌های مجاز تأخیر (ناوقت حساب نشود)</span><input name="staff_grace_min" type="number" value="${esc(s.staff_grace_min || 10)}"></label>
+        <label class="check"><input type="checkbox" name="staff_late_deduct" ${s.staff_late_deduct === '1' ? 'checked' : ''}> دقیقه‌های ناوقت آمدن از معاش کم شود</label>
+        <label class="check"><input type="checkbox" name="staff_hourly_paid" ${s.staff_hourly_paid === '1' ? 'checked' : ''}> رخصتی ساعتی به‌طور پیش‌فرض با معاش باشد</label>
+        <label class="field"><span>نمای پیش‌فرض برنامه</span><select name="ui_mode">${opt([['simple', 'جدید (ساده و با انیمیشن)'], ['classic', 'کلاسیک']], s.ui_mode || 'simple')}</select></label></div>
+        <div class="secTitle">لابراتوار: کیفیت و تأیید</div><div class="formGrid">
+        <label class="field"><span>Delta check عمومی ٪</span><input name="lab_delta_pct" type="number" value="${esc(s.lab_delta_pct || 50)}"></label>
+        <label class="check"><input type="checkbox" name="lab_autoverify" ${s.lab_autoverify === '1' ? 'checked' : ''}> تأیید خودکار وقتی همه نتایج نارمل است (بدون بحرانی و Delta)</label>
+        <label class="check"><input type="checkbox" name="lab_report_qr" ${s.lab_report_qr !== '0' ? 'checked' : ''}> QR تأیید اصالت روی راپور لابراتوار</label></div>
+        <div class="secTitle">پیام‌های یادآوری (واتس‌اپ) <span class="hint">{name} {doctor} {date} {time} {clinic} {vaccine} {code}</span></div><div class="formGrid">
+        <label class="field"><span>کد کشور</span><input name="whatsapp_country" class="ltr" value="${esc(s.whatsapp_country || '93')}"></label>
+        ${[['msg_reservation', 'نوبت / رزرو'], ['msg_visit', 'مراجعه بعدی'], ['msg_vaccine', 'واکسین'], ['msg_lab', 'نتیجه آزمایش'], ['msg_lapsed', 'مریضانی که نیامدند']].map(([k, l]) => `<label class="field full"><span>${l}</span><input name="${k}" value="${esc(s[k] || '')}"></label>`).join('')}</div>
+        <div class="grid g2" style="margin-top:10px">${L('vaccine_schedule', 'برنامه واکسین (نام | روز بعد از تولد)', 10)}${L('peds_doses', 'دوز اطفال (نام|نام دیگر | mg/kg هر بار | دفعات در روز | حداکثر mg هر بار)', 10)}</div></div>
       </form>`;
     $('#stT', view).onclick = (e) => { const b = e.target.closest('[data-t]'); if (!b) return; $$('#stT button', view).forEach(x => x.classList.toggle('on', x === b)); $$('[data-p]', view).forEach(p => p.classList.toggle('hidden', p.dataset.p !== b.dataset.t)); };
     const collect = () => {
@@ -339,7 +353,8 @@ Pages.local = {
       <div class="card"><h2>${icon('settings')} عمومی</h2><label class="check"><input type="checkbox" id="snd" ${localGet('sound', '1') === '1' ? 'checked' : ''}> صدای اطلاع (نسخه / مریض / آزمایش جدید)</label>
         <label class="check" style="margin-top:8px"><input type="checkbox" id="faT" ${localGet('fa_typing', '1') === '1' ? 'checked' : ''}> نام و مشخصات مریض همیشه فارسی تایپ شود (حتی وقتی کیبورد انگلیسی است)</label>
         <div class="secTitle">${icon('eye', 15)} شکل برنامه</div>
-        <div class="chips" id="uiM">${[['classic', 'کلاسیک (فعلی)'], ['simple', 'ساده (بزرگ و واضح)']].map(([k, l]) => `<button type="button" class="chip ${(localGet('ui_mode', App.settings.ui_mode || 'classic') === k) ? 'on' : ''}" data-ui="${k}">${l}</button>`).join('')}</div>
+        <div class="chips" id="uiM">${[['simple', 'جدید (ساده، بزرگ و با انیمیشن)'], ['classic', 'کلاسیک (قبلی)']].map(([k, l]) => `<button type="button" class="chip ${(localGet('ui_mode', App.settings.ui_mode || 'simple') === k) ? 'on' : ''}" data-ui="${k}">${l}</button>`).join('')}</div>
+        <div class="chips" id="mtM" style="margin-top:8px">${[['on', 'انیمیشن روشن'], ['off', 'بدون انیمیشن (کمپیوتر کند)']].map(([k, l]) => `<button type="button" class="chip ${localGet('motion', 'on') === k ? 'on' : ''}" data-mt="${k}">${l}</button>`).join('')}</div>
         <div class="secTitle">${icon('moon', 15)} حالت نمایش و رنگ</div>
         <div class="chips" id="thM">${[['light', 'روشن'], ['dark', 'تاریک'], ['auto', 'خودکار (مطابق ویندوز)']].map(([k, l]) => `<button type="button" class="chip ${Theme.mode() === k ? 'on' : ''}" data-th="${k}">${l}</button>`).join('')}</div>
         <div class="bar" style="margin-top:10px;flex-wrap:wrap">${['', '#0f7a3a', '#1d4ed8', '#7c3aed', '#be123c', '#c2410c', '#0e7490', '#334155'].map(c => `<button type="button" class="btn sm" data-acc="${c}" style="${c ? `background:${c};color:#fff;border-color:${c}` : ''}">${c ? '&nbsp;' : 'رنگ ایستگاه'}</button>`).join('')}<input type="color" id="accC" value="${esc(localGet('accent_' + (App.station || 'browser'), '') || STATIONS[App.station || 'admin']?.color || '#0f7a3a')}" title="رنگ دلخواه"></div>
@@ -348,6 +363,7 @@ Pages.local = {
         ${nat && nat.openData && App.station === 'admin' ? `<button class="btn" style="margin-top:12px" data-act="data">${icon('database')} باز کردن پوشه دیتابیس</button>` : ''}</div></div>`;
     const bind = (id, key, chk) => { const el = $('#' + id, view); if (el) el.onchange = () => { localSet(key, chk ? (el.checked ? '1' : '0') : el.value); toast('ذخیره شد', 'good'); }; };
     bind('pr_r', 'printer_receipt'); bind('pr_p', 'printer_page'); bind('pr_l', 'printer_label'); bind('sl_r', 'silent_receipt', 1); bind('sl_p', 'silent_page', 1); bind('sl_l', 'silent_label', 1); bind('snd', 'sound', 1); bind('faT', 'fa_typing', 1);
+    $('#mtM', view).onclick = (e) => { const b = e.target.closest('[data-mt]'); if (!b) return; localSet('motion', b.dataset.mt); $$('#mtM .chip', view).forEach(x => x.classList.toggle('on', x === b)); Theme.apply(); };
     $('#uiM', view).onclick = (e) => { const b = e.target.closest('[data-ui]'); if (!b) return; localSet('ui_mode', b.dataset.ui); $$('#uiM .chip', view).forEach(x => x.classList.toggle('on', x === b)); Theme.apply(); };
     $('#thM', view).onclick = (e) => { const b = e.target.closest('[data-th]'); if (!b) return; localSet('theme', b.dataset.th); $$('#thM .chip', view).forEach(x => x.classList.toggle('on', x === b)); Theme.apply(); };
     const setAcc = (c) => { localSet('accent_' + (App.station || 'browser'), c); Theme.apply(); toast('رنگ ذخیره شد', 'good'); };

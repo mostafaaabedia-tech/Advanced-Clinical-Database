@@ -10,7 +10,8 @@ async function printDoc(html, { size = 'A4', title = 'document' } = {}) {
   const area = $('#printArea');
   area.innerHTML = html;
   area.dataset.size = size;
-  const [lw, lh] = labelSize();
+  const [lw, lh] = size === 'card' ? [86, 54] : labelSize();
+  if (size === 'card') size = 'label';
   $('#pageStyle').textContent = size === 'receipt' ? `@page { size: ${App.settings.receipt_width || 80}mm auto; margin: 0 }` : size === 'label' ? `@page { size: ${lw}mm ${lh}mm; margin: 0 }` : `@page { size: ${size} portrait; margin: 0 }`;
   await new Promise(r => setTimeout(r, 120));
   try { await document.fonts.ready; } catch (_) { }
@@ -25,9 +26,10 @@ async function printDoc(html, { size = 'A4', title = 'document' } = {}) {
 async function savePdf(html, { size = 'A4', title = 'document' } = {}) {
   if (!(window.native && window.native.pdf)) return printDoc(html, { size, title });
   const area = $('#printArea'); area.innerHTML = html; area.dataset.size = size;
-  $('#pageStyle').textContent = size === 'receipt' ? `@page { size: ${App.settings.receipt_width || 80}mm 200mm; margin: 0 }` : `@page { size: ${size} portrait; margin: 0 }`;
+  const small = size === 'card' ? [86, 54] : size === 'label' ? labelSize() : null;
+  $('#pageStyle').textContent = size === 'receipt' ? `@page { size: ${App.settings.receipt_width || 80}mm 200mm; margin: 0 }` : small ? `@page { size: ${small[0]}mm ${small[1]}mm; margin: 0 }` : `@page { size: ${size} portrait; margin: 0 }`;
   await new Promise(r => setTimeout(r, 120));
-  try { const p = await window.native.pdf({ name: title, pageSize: size === 'receipt' ? 'A5' : size }); if (p) toast('PDF ذخیره شد', 'good'); }
+  try { const p = await window.native.pdf({ name: title, pageSize: size === 'receipt' || small ? 'A5' : size }); if (p) toast('PDF ذخیره شد', 'good'); }
   finally { setTimeout(() => { area.innerHTML = ''; }, 500); }
 }
 // preview dialog with print / PDF buttons
@@ -270,6 +272,7 @@ function labReportHTML(r) {
     <tbody><tr><td class="lbf">${sec || '<p class="muted">No results.</p>'}
       ${r.report_note ? `<div class="rSec"><h3>Comment</h3><div class="commentBox">${esc(r.report_note)}</div></div>` : ''}
       ${s.lab_show_signature !== '0' ? `<div class="signRow"><div>${esc(signL)}${r.checked_by_name ? `<br><small>${esc(r.checked_by_name)}</small>` : ''}</div><div>${esc(signR)}${r.approved_by_name ? `<br><small>${esc(r.approved_by_name)}</small>` : ''}</div></div>` : ''}
+      ${s.lab_report_qr !== '0' && r.verify_key && ['approved', 'delivered'].includes(r.status) ? `<div class="qrBox">${qrSVG(`ACDB-VERIFY ${r.lab_code} ${r.verify_key}`)}<div><b>Verify</b><br><span class="ltr">${esc(r.lab_code)} · ${esc(r.verify_key)}</span><br><small>Scan or type this code in the clinic system to confirm the report is genuine.</small></div></div>` : ''}
       ${s.lab_report_footer ? `<div class="labFootNote">${esc(s.lab_report_footer)}</div>` : ''}
       ${s.lab_show_print_time === '1' ? `<div class="docSub" style="margin-top:3mm">${esc(fmtDateTimeNum(new Date()))}</div>` : ''}</td></tr></tbody>
     <tfoot><tr><td><div class="footSpace"></div></td></tr></tfoot></table>
@@ -325,4 +328,9 @@ function purchaseDocHTML(p) {
 function reportDocHTML(title, inner, sub = '') {
   return `<div class="doc size-A4 plainDoc">${clinicLetterhead()}<div class="docTitle rtl">${esc(title)}</div>${sub ? `<div class="docSub">${sub}</div>` : ''}<div class="rtl repBody">${inner}</div>
     <div class="docSub">چاپ: ${esc(fmtDateTimeNum(new Date()))} — ${esc(App.user?.full_name || '')}</div></div>`;
+}
+
+// QR code (SVG) — used on lab reports and patient cards
+function qrSVG(text, cell = 2) {
+  try { const q = qrcode(0, 'M'); q.addData(unescape(encodeURIComponent(text))); q.make(); return q.createSvgTag({ cellSize: cell, margin: 0, scalable: true }); } catch (_) { return ''; }
 }

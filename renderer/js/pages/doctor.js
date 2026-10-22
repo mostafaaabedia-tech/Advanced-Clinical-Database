@@ -118,7 +118,7 @@ Pages.encounter = {
     view.innerHTML = `
       <div class="pageHead"><div class="ptHead">${patientHeadHTML(patient)}</div>
         <div class="toolbar">${visit ? `<span class="pill info">نوبت ${visit.turn_no || '—'} · ${esc(visit.service_name)}</span>${['waiting', 'in_visit'].includes(visit.status) ? `<button class="btn sm" data-act="call" title="اعلام نوبت در صفحه نمایش">${icon('megaphone', 14)} صدا زدن</button>` : ''}` : ''}${enc ? `<span class="pill">ویزیت #${enc.id}</span>` : '<span class="pill warn">ویزیت جدید</span>'}
-          <button class="btn" data-act="file">${icon('file')} پرونده کامل</button><button class="btn" data-act="editPt">${icon('edit')} مشخصات</button></div></div>
+          <button class="btn" data-act="file">${icon('file')} پرونده کامل</button><button class="btn" data-act="editPt">${icon('edit')} مشخصات</button>${typeof patientToolsHTML === 'function' ? patientToolsHTML(patient, 'enc') : ''}</div></div>
       ${visit?.note ? `<div class="infoBox">یادداشت پذیرش: ${esc(visit.note)}</div>` : ''}
       ${patient.allergies ? `<div class="warnBox">${icon('alert', 15)} حساسیت: <b>${esc(patient.allergies)}</b></div>` : ''}
       <div id="savedBanner">${params.saved || ''}</div>
@@ -214,7 +214,7 @@ Pages.encounter = {
         <input data-f="duration_unit" data-combo="dur" value="${esc(it.duration_unit || 'days')}" class="en" autocomplete="off">
         <input data-f="qty" type="number" value="${esc(it.qty ?? '')}" title="تعداد برای دواخانه">
         ${rxLocked ? '<span></span>' : `<button class="btn ghost icon" data-del="${i}" title="حذف">${icon('trash', 15)}</button>`}
-        <div class="rxNoteIn"><span class="sigPrev en" title="روی نسخه این‌طور چاپ می‌شود">${esc([rxSigEn(it), rxEn(it.timing), rxDurationEn(it)].filter(Boolean).join(' · '))}</span>${/date/i.test(it.duration_unit || '') ? `<button type="button" class="btn sm" data-dates="${i}">${icon('calendar', 13)} تاریخ‌ها (${String(it.dates || '').split(',').filter(Boolean).length})</button>` : ''}<input data-f="note" placeholder="یادداشت این دوا (مثلاً: with plenty of water…)" value="${esc(it.note || '')}"></div>
+        <div class="rxNoteIn">${rxLocked ? '' : `<button type="button" class="btn ghost icon sm favStar" data-fav="${i}" title="افزودن به دواهای مورد علاقه من">${icon('star', 14)}</button>`}<span class="sigPrev en" title="روی نسخه این‌طور چاپ می‌شود">${esc([rxSigEn(it), rxEn(it.timing), rxDurationEn(it)].filter(Boolean).join(' · '))}</span>${/date/i.test(it.duration_unit || '') ? `<button type="button" class="btn sm" data-dates="${i}">${icon('calendar', 13)} تاریخ‌ها (${String(it.dates || '').split(',').filter(Boolean).length})</button>` : ''}<input data-f="note" placeholder="یادداشت این دوا (مثلاً: with plenty of water…)" value="${esc(it.note || '')}"></div>
       </div>`).join('') || '<div class="empty" style="padding:16px">دوایی اضافه نشده</div>';
       if (rxLocked) $$('input', rowsEl).forEach(i => i.readOnly = true);
       runCdss();
@@ -412,6 +412,8 @@ Pages.encounter = {
       }
     });
     view.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save($('[data-act="save"]:not([data-mode])', view), 'none'); } });
+    // v1.4: favourite medicines, patient tools (documents, vaccines, growth chart, child dose, certificates, card)
+    if (typeof encounterExtras === 'function') encounterExtras(view, { patient, rxItems, drawRx, rxLocked, enc: () => encId, visit, file, enRx });
   }
 };
 
@@ -420,7 +422,7 @@ async function openPatientFile(id) {
   const f = await API.get('/api/patient-file/' + id);
   const p = f.patient;
   const m = modal({ title: 'پرونده مریض — ' + esc(p.code), size: 'xwide', body: `
-    <div class="ptHead">${patientHeadHTML(p)}<div class="bar"><button class="btn primary" data-a="visit">${icon('rx')} ویزیت / نسخه جدید</button><button class="btn" data-a="edit">${icon('edit')} ویرایش</button></div></div>
+    <div class="ptHead">${patientHeadHTML(p)}<div class="bar"><button class="btn primary" data-a="visit">${icon('rx')} ویزیت / نسخه جدید</button><button class="btn" data-a="edit">${icon('edit')} ویرایش</button>${typeof patientToolsHTML === 'function' ? patientToolsHTML(p, 'file') : ''}</div></div>
     <div class="grid g4" style="margin:12px 0">${kpi('مراجعات', f.visits.length, { ic: 'calendar' })}${kpi('ویزیت داکتر', f.encounters.length, { ic: 'steth' })}${kpi('نسخه‌ها', f.prescriptions.length, { ic: 'rx' })}${kpi('آزمایش‌ها', f.labs.length, { ic: 'flask' })}</div>
     <div class="tabs" id="pfTabs"><button class="on" data-t="sum">خلاصه</button><button data-t="enc">ویزیت‌ها و نسخه‌ها</button><button data-t="lab">نتایج آزمایش</button><button data-t="vit">روند علایم حیاتی</button><button data-t="vis">مراجعات (پذیرش)</button></div>
     <div id="pfBody"></div>` });
@@ -454,6 +456,7 @@ async function openPatientFile(id) {
     const lr = e.target.closest('[data-labrep]');
     if (lr) { try { const r = await API.get('/api/lab/req/x', { id: lr.dataset.labrep }); previewDoc(labReportHTML(r), { size: 'A4', title: r.lab_code }); } catch (err) { errToast(err); } }
   });
+  if (typeof bindPatientTools === 'function') bindPatientTools(m.el, p);
   show('sum');
 }
 

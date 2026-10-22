@@ -508,7 +508,8 @@ const Theme = {
   apply() {
     const dark = this.dark();
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    document.documentElement.dataset.ui = localGet('ui_mode', App.settings?.ui_mode || 'classic') === 'simple' ? 'simple' : 'classic';
+    document.documentElement.dataset.ui = localGet('ui_mode', App.settings?.ui_mode || 'simple') === 'simple' ? 'simple' : 'classic';
+    document.documentElement.dataset.motion = localGet('motion', 'on') === 'off' ? 'off' : 'on';
     const st = STATIONS[App.station] || STATIONS.admin;
     let accent = localGet('accent_' + (App.station || 'browser'), '') || App.settings['color_' + (App.station || 'admin')] || '';
     if (!/^#[0-9a-f]{6}$/i.test(accent)) accent = '';

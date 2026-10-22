@@ -58,6 +58,21 @@ const DEFAULT_SETTINGS = {
   rx_duration_units: LIST(...RX_EN_LISTS.rx_duration_units),
   rx_doses: LIST(...RX_EN_LISTS.rx_doses),
   fa_typing: '1',
+  // v1.4
+  ui_mode: 'simple',
+  whatsapp_country: '93',
+  msg_visit: 'سلام {name}، یادآوری: تاریخ مراجعه بعدی شما نزد {doctor} روز {date} است. — {clinic}',
+  msg_reservation: 'سلام {name}، نوبت شما در {clinic} روز {date} ساعت {time} نزد {doctor} است.',
+  msg_vaccine: 'سلام، واکسین {vaccine} طفل شما {name} تاریخ {date} است. لطفاً به {clinic} مراجعه کنید.',
+  msg_lab: 'سلام {name}، نتیجه آزمایش شما ({code}) آماده است. — {clinic}',
+  msg_lapsed: 'سلام {name}، تاریخ مراجعه بعدی شما ({date}) گذشته است. برای ادامه تداوی به {clinic} مراجعه کنید.',
+  vaccine_schedule: LIST('BCG | 0', 'OPV-0 | 0', 'Hepatitis B (birth) | 0', 'OPV-1 | 42', 'Penta-1 | 42', 'PCV-1 | 42', 'Rota-1 | 42', 'OPV-2 | 70', 'Penta-2 | 70', 'PCV-2 | 70', 'Rota-2 | 70',
+    'OPV-3 | 98', 'Penta-3 | 98', 'PCV-3 | 98', 'IPV | 98', 'Measles / MR-1 | 274', 'Measles / MR-2 | 548'),
+  peds_doses: LIST('Paracetamol | 15 | 4 | 1000', 'Ibuprofen | 10 | 3 | 400', 'Amoxicillin | 25 | 2 | 1000', 'Co-amoxiclav|Augmentin|Amoxiclav | 22.5 | 2 | 875', 'Azithromycin | 10 | 1 | 500',
+    'Cefixime | 8 | 1 | 400', 'Cephalexin|Cefalexin | 12.5 | 4 | 1000', 'Cefuroxime | 15 | 2 | 500', 'Metronidazole | 7.5 | 3 | 500', 'Cotrimoxazole|Co-trimoxazole | 4 | 2 | 160',
+    'Erythromycin | 12.5 | 4 | 500', 'Clarithromycin | 7.5 | 2 | 500', 'Salbutamol | 0.1 | 3 | 2'),
+  staff_grace_min: '10', staff_late_deduct: '0', staff_hourly_paid: '0',
+  lab_delta_pct: '50', lab_autoverify: '0', lab_report_qr: '1', restrict_finance: '0',
   expense_categories: LIST('معاش کارمندان', 'بل برق', 'انترنت / وایفای', 'کرایه', 'قرطاسیه', 'نظافت', 'مواد سونوگرافی', 'مواد مصرفی', 'ترانسپورت', 'ترمیمات', 'شخصی', 'برگشتی', 'سایر'),
   medicine_categories: LIST('انتی بیوتیک', 'مسکن و ضد التهاب', 'ویتامین و مکمل', 'گوارشی', 'تنفسی و حساسیت', 'قلبی و فشار خون', 'دیابت', 'زنانه و ولادی', 'اطفال', 'سیروم و پیچکاری', 'پوستی', 'چشم و گوش', 'عصبی', 'سایر'),
   medicine_units: LIST('عدد', 'تابلیت', 'کپسول', 'بوتل', 'ورق', 'قطی', 'امپول', 'ویال', 'تیوب', 'ساشه', 'بسته'),
@@ -192,6 +207,11 @@ function ensureDefaults(db) {
         db.db.run('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)', [k, [...list, ...custom].join('\n')]);
       }
       db.db.run("INSERT OR REPLACE INTO settings(key,value) VALUES('rx_lists_en','1')");
+    }
+    // v1.4: the new (simple) look with animations becomes the default once, for upgraded installs too (each computer can still choose)
+    if (db.getSetting('ui_v14', '0') !== '1') {
+      db.db.run("INSERT OR REPLACE INTO settings(key,value) VALUES('ui_mode','simple')");
+      db.db.run("INSERT OR REPLACE INTO settings(key,value) VALUES('ui_v14','1')");
     }
     // differential counts print in the side column of the CBC (like the lab's previous report)
     if (db.getSetting('lab_side_seeded', '0') !== '1') {

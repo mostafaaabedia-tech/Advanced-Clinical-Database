@@ -1,0 +1,146 @@
+/* v1.4: staff / attendance, reminders, patient tools, pharmacy & stock tools, lab quality — and the motion layer of the new look.
+   Animations are short (120–380 ms), only move/fade, and are switched off for people who ask the system for reduced motion. */
+
+.g5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1250px) { .g5 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+.toast.warn { background: #8a5a00; color: #fff; }
+
+/* ---------- staff board ---------- */
+.clockBig { font-size: 30px; font-weight: 700; color: var(--brand); font-variant-numeric: tabular-nums; direction: ltr; align-self: end; padding: 0 8px; }
+.staffBoard { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+.staffCard { background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 10px; border-inline-start: 5px solid var(--line-2); transition: transform .18s, box-shadow .18s, border-color .18s; }
+.staffCard.present { border-inline-start-color: var(--good); }
+.staffCard.absent { border-inline-start-color: var(--bad); }
+.staffCard.leave, .staffCard.holiday { border-inline-start-color: var(--info); }
+.staffCard.none { border-inline-start-color: var(--warn); }
+.staffCard.off { opacity: .7; }
+.scHead { display: flex; align-items: center; gap: 10px; }
+.scHead > div:nth-child(2) { flex: 1; min-width: 0; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); font-weight: 700; font-size: 17px; flex: none; }
+.scTimes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.scTimes > div { background: var(--surface-2); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.scTimes small { color: var(--muted); font-size: 11.5px; }
+.scTimes b { font-size: 19px; font-variant-numeric: tabular-nums; }
+.scLeaves { font-size: 12.5px; background: var(--info-soft); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; gap: 3px; }
+.scLeaves a { color: var(--bad); text-decoration: none; font-weight: 700; padding: 0 4px; }
+.scBtns { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ---------- patient tools / card / documents ---------- */
+.ptTools { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.ptTools .btn.violet { border-color: var(--violet); color: var(--violet); }
+.docGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.docTile { border: 1.5px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); position: relative; display: flex; flex-direction: column; }
+.docTile > a { display: block; height: 130px; background: var(--surface-2); }
+.docTile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pdfIc { height: 100%; display: grid; place-items: center; font-weight: 800; font-size: 26px; color: var(--bad); letter-spacing: 1px; }
+.dtInfo { padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.dtInfo small { color: var(--muted); font-size: 11.5px; }
+.docTile .btn { position: absolute; top: 6px; left: 6px; background: rgba(255,255,255,.92); }
+.doseOut { margin-top: 12px; padding: 14px 16px; border-radius: 12px; background: var(--brand-soft); color: var(--brand-ink); display: flex; flex-direction: column; gap: 4px; min-height: 64px; }
+.doseBig { font-size: 20px; } .doseBig b { font-size: 28px; }
+.favBar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.favChip { display: inline-flex; align-items: center; gap: 6px; }
+.favChip .x { color: var(--muted); font-weight: 700; padding: 0 2px; border-radius: 4px; }
+.favChip .x:hover { color: var(--bad); background: var(--bad-soft); }
+.favStar { color: var(--muted); } .favStar.on, .favStar:hover { color: #e0a100; }
+
+/* printed: patient card 86 × 54 mm */
+.doc.pCard { width: 86mm; height: 54mm; min-height: 0; padding: 3mm 4mm; direction: rtl; color: #000; background: #fff; display: flex; flex-direction: column; gap: 1.5mm; overflow: hidden; border-radius: 3mm; font-size: 9.5pt; }
+.pcHead { display: flex; align-items: center; gap: 2mm; border-bottom: .4mm solid #0f4c81; padding-bottom: 1.2mm; }
+.pcHead img { height: 8mm; } .pcHead b { font-size: 10pt; display: block; } .pcHead small { font-size: 7.5pt; }
+.pcBody { display: flex; gap: 2mm; flex: 1; min-height: 0; }
+.pcInfo { flex: 1; display: flex; flex-direction: column; gap: .6mm; font-size: 8.5pt; }
+.pcName { font-size: 11pt; font-weight: 700; }
+.pcQr svg { width: 18mm; height: 18mm; }
+.pcBar { text-align: center; } .pcBar svg { height: 9mm; max-width: 100%; }
+/* printed: dispensing label 86 × 54 mm */
+.doc.dLabel { width: 86mm; height: 54mm; min-height: 0; padding: 2.5mm 3.5mm; direction: rtl; color: #000; background: #fff; display: flex; flex-direction: column; gap: 1.2mm; overflow: hidden; font-size: 9pt; }
+.dlHead { display: flex; justify-content: space-between; font-size: 8pt; border-bottom: .3mm solid #000; padding-bottom: .8mm; }
+.dlName { direction: ltr; text-align: left; font-size: 11pt; display: flex; align-items: baseline; gap: 1.5mm; }
+.dlQty { margin-inline-start: auto; font-weight: 700; }
+.dlPt { font-size: 8.5pt; }
+.dlSlots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1mm; }
+.dlSlots > div { border: .3mm solid #000; border-radius: 1.2mm; text-align: center; padding: .6mm 0; display: flex; flex-direction: column; }
+.dlSlots > div.on { background: #000; color: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.dlSlots small { font-size: 7.5pt; } .dlSlots b { font-size: 10.5pt; }
+.dlSig { direction: ltr; text-align: left; font-weight: 700; font-size: 9pt; }
+.dlNote { direction: ltr; text-align: left; font-size: 8pt; }
+/* printed: certificate on the letterhead */
+.certDoc { direction: rtl; display: flex; flex-direction: column; }
+.doc.certDoc.size-A5 { width: 210mm; min-height: 297mm; zoom: .7048; padding: 9mm 10mm 0; }
+.certDoc .lhFoot { margin-top: auto; }
+.certBody { font-size: 17px !important; }
+.certBody { flex: 1; padding: 6mm 12mm; font-size: 13px; line-height: 2.1; }
+.certBody h2 { text-align: center; margin: 2mm 0 4mm; font-size: 17px; text-decoration: underline; text-underline-offset: 5px; }
+.certDate { text-align: left; font-size: 12px; }
+.certSign { display: flex; justify-content: flex-end; margin-top: 14mm; text-align: center; }
+.signRow { display: flex; justify-content: space-between; padding: 0 10mm; }
+.docPreview.size-card { gap: 10px; }
+
+/* ---------- stock / lab tools ---------- */
+table.t.matrix td, table.t.matrix th { text-align: center; }
+table.t.matrix td { display: table-cell; } table.t.matrix td b { display: block; font-size: 18px; } table.t.matrix td small { color: var(--muted); font-size: 11px; }
+table.t.matrix td.hot { background: var(--bad-soft) !important; }
+.reqCard .hh { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.reqCard .hh > span { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.progress { height: 7px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin-bottom: 10px; border: 1px solid var(--line); }
+.progress > div { height: 100%; background: linear-gradient(90deg, var(--good), #34c38f); border-radius: 99px; transition: width .6s cubic-bezier(.2,.8,.2,1); }
+.verifyOk { border: 2px solid var(--good) !important; background: var(--good-soft); }
+.verifyOk h2 { color: var(--good) !important; }
+.verifyBad { border: 2px solid var(--bad) !important; background: var(--bad-soft); color: var(--bad); }
+tr.lateRow td { background: var(--bad-soft) !important; }
+tr.totRow td { font-weight: 700; background: var(--brand-soft) !important; }
+
+/* ======================================================================= motion */
+@keyframes v14In { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes v14Pop { from { opacity: 0; transform: scale(.94) translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes v14Toast { from { opacity: 0; transform: translateY(16px) scale(.96); } 60% { transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+@keyframes v14Fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes v14Pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(192, 54, 44, .35); } 50% { box-shadow: 0 0 0 6px rgba(192, 54, 44, 0); } }
+@keyframes v14Shine { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+
+/* new look: pages slide in, cards follow one after another */
+html[data-ui="simple"] #view > * { animation: v14In .32s cubic-bezier(.2,.8,.2,1) both; }
+html[data-ui="simple"] #view > *:nth-child(2) { animation-delay: .04s; }
+html[data-ui="simple"] #view > *:nth-child(3) { animation-delay: .08s; }
+html[data-ui="simple"] #view > *:nth-child(4) { animation-delay: .12s; }
+html[data-ui="simple"] #view > *:nth-child(n+5) { animation-delay: .16s; }
+html[data-ui="simple"] .grid > .kpi { animation: v14Pop .36s cubic-bezier(.2,.8,.2,1) both; }
+html[data-ui="simple"] .grid > .kpi:nth-child(2) { animation-delay: .05s; } html[data-ui="simple"] .grid > .kpi:nth-child(3) { animation-delay: .1s; }
+html[data-ui="simple"] .grid > .kpi:nth-child(4) { animation-delay: .15s; } html[data-ui="simple"] .grid > .kpi:nth-child(5) { animation-delay: .2s; }
+html[data-ui="simple"] .staffBoard > .staffCard { animation: v14Pop .3s cubic-bezier(.2,.8,.2,1) both; }
+html[data-ui="simple"] .staffBoard > .staffCard:nth-child(2) { animation-delay: .03s; } html[data-ui="simple"] .staffBoard > .staffCard:nth-child(3) { animation-delay: .06s; }
+html[data-ui="simple"] .staffBoard > .staffCard:nth-child(4) { animation-delay: .09s; } html[data-ui="simple"] .staffBoard > .staffCard:nth-child(n+5) { animation-delay: .12s; }
+/* dialogs pop, background fades */
+html[data-ui="simple"] .modalBack { animation: v14Fade .18s ease both; backdrop-filter: blur(2px); }
+html[data-ui="simple"] .modal { animation: v14Pop .24s cubic-bezier(.2,.9,.25,1.1) both; }
+/* toasts bounce in, with a coloured edge */
+html[data-ui="simple"] .toast { animation: v14Toast .38s cubic-bezier(.2,.8,.2,1) both; border-inline-start: 4px solid rgba(255,255,255,.5); font-size: 14px; padding: 13px 18px; }
+/* hover / press feedback */
+html[data-ui="simple"] .btn { transition: transform .12s, box-shadow .18s, background-color .18s, border-color .18s, color .18s; }
+html[data-ui="simple"] .btn:not(:disabled):hover { box-shadow: 0 4px 14px rgba(15, 23, 42, .09); }
+html[data-ui="simple"] .btn:not(:disabled):active { transform: scale(.96); }
+html[data-ui="simple"] .btn.busy { background-image: linear-gradient(90deg, transparent 0, rgba(255,255,255,.35) 50%, transparent 100%); background-size: 200% 100%; animation: v14Shine 1s linear infinite; }
+html[data-ui="simple"] .kpi, html[data-ui="simple"] .staffCard, html[data-ui="simple"] .docTile { transition: transform .18s, box-shadow .18s, border-color .18s; }
+html[data-ui="simple"] .kpi:hover, html[data-ui="simple"] .staffCard:hover, html[data-ui="simple"] .docTile:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(15, 23, 42, .08); border-color: var(--line-2); }
+html[data-ui="simple"] .navItem { transition: background-color .18s, color .18s, transform .12s; }
+html[data-ui="simple"] .navItem:not(.on):hover { background: var(--brand-soft); transform: translateX(-3px); }
+html[data-ui="simple"] .navItem .cnt:not(.hidden) { animation: v14Pulse 2s ease-in-out infinite; }
+html[data-ui="simple"] .chip { transition: background-color .15s, color .15s, transform .12s, border-color .15s; }
+html[data-ui="simple"] .chip:active { transform: scale(.95); }
+html[data-ui="simple"] .tabs button { transition: color .15s, border-color .2s, background-color .2s; }
+html[data-ui="simple"] table.t tbody tr { transition: background-color .12s; }
+html[data-ui="simple"] table.t tbody tr:hover td { background: var(--brand-soft); }
+html[data-ui="simple"] .dropdown:not(.hidden), html[data-ui="simple"] .floatDD:not(.hidden) { animation: v14Pop .14s ease-out both; }
+.pop { animation: v14Pop .26s cubic-bezier(.2,.8,.2,1) both; }
+/* respect "reduce motion" */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}
+html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="off"] *::after { animation: none !important; transition: none !important; }
+
+/* dark mode tweaks for the new parts */
+html[data-theme="dark"] .docTile .btn { background: rgba(20, 26, 38, .9); }
+html[data-theme="dark"] .scTimes > div { background: rgba(255,255,255,.04); }
+@media print { .pop, #view > * { animation: none !important; } }

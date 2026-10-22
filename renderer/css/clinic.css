@@ -286,3 +286,6 @@ table.posT .medCell { direction: ltr; text-align: left; }
 .maSum tr.total td { font-weight: 800; font-size: 16px; border-top: 2px solid var(--text-2); background: var(--surface-2); }
 .maSum tr.total.pos td:last-child { color: var(--good); }
 .rxHist td { vertical-align: top; }
+
+.qrBox { display: flex; gap: 3mm; align-items: center; margin-top: 4mm; font-size: 9.5px; color: #333; direction: ltr; }
+.qrBox svg { width: 20mm; height: 20mm; flex: 0 0 20mm; }

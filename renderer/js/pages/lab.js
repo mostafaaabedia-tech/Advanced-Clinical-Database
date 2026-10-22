@@ -227,7 +227,15 @@ Pages['lab-work'] = {
         $$('[data-tid]', view).forEach(el => { const t = byId.get(Number(el.dataset.tid)); const n = num(el.value); if (n !== null) vals[t.code.toUpperCase()] = n; });
         $$('[data-tid].calc', view).forEach(el => { const t = byId.get(Number(el.dataset.tid)); const v = evalFormula(t.formula, vals, { age: (ageDays || 0) / 365.25, female: sex === 'F' ? 1 : 0 }); el.value = v === null ? '' : fmtNum(v, t.decimals ?? 2); if (v !== null) vals[t.code.toUpperCase()] = v; });
         $$('[data-tid]', view).forEach(el => { const t = byId.get(Number(el.dataset.tid)); const f = computeFlag(t, el.value, resolveRange(t, sex, ageDays)); const fl = $(`[data-flag="${t.id}"]`, view); fl.textContent = f || ''; fl.className = 'flag ' + (f || ''); el.closest('tr').classList.toggle('abn', !!f); el.closest('tr').classList.toggle('crit', f === 'HH' || f === 'LL');
-          const al = alarmOf(t, el.value, resolveRange(t, sex, ageDays)); el.classList.toggle('impossible', al === 'impossible'); el.closest('tr').classList.toggle('alarm', al === 'alarm'); el.title = al === 'impossible' ? 'این مقدار ممکن نیست — دوباره بررسی کنید' : al === 'alarm' ? 'در محدوده خطر' : ''; });
+          const al = alarmOf(t, el.value, resolveRange(t, sex, ageDays)); el.classList.toggle('impossible', al === 'impossible'); el.closest('tr').classList.toggle('alarm', al === 'alarm'); el.title = al === 'impossible' ? 'این مقدار ممکن نیست — دوباره بررسی کنید' : al === 'alarm' ? 'در محدوده خطر' : '';
+          // delta check: big change from the previous answer of this patient
+          const pv = ((r.prev || {})[t.id] || [])[0], a1 = num(String(el.value).replace(/^[<>]=?\s*/, '')), a0 = pv ? num(String(pv.value).replace(/^[<>]=?\s*/, '')) : null;
+          const lim = Number(t.delta_pct ?? App.settings.lab_delta_pct ?? 50) || 0;
+          const dpct = a1 !== null && a0 ? Math.abs(a1 - a0) / Math.abs(a0) * 100 : 0;
+          const dl = lim > 0 && dpct > lim;
+          el.closest('tr').classList.toggle('delta', dl);
+          if (dl) { fl.textContent = (f ? f + ' ' : '') + 'Δ'; fl.className = 'flag ' + (f || '') + ' dflag'; el.title = (el.title ? el.title + ' · ' : '') + `تغییر ${Math.round(dpct)}٪ نسبت به جواب قبلی (${pv.value}) — دوباره بررسی کنید`; }
+          el.dataset.delta = dl ? '1' : ''; el.dataset.alarm = al || ''; });
         $$('.deptPage', view).forEach(d => { const ins = $$('[data-tid]', d); const filled = ins.filter(x => String(x.value).trim()).length; const c = $(`[data-cnt="${d.dataset.page}"]`, view); if (c) { c.textContent = `${filled}/${ins.length}`; c.parentElement.classList.toggle('done', ins.length > 0 && filled === ins.length); } });
       };
       $('#workBody', view).addEventListener('input', refresh); $('#workBody', view).addEventListener('change', refresh);
@@ -257,8 +265,15 @@ Pages['lab-work'] = {
       cancel: async () => { const why = await promptDlg('لغو درخواست آزمایش', { label: 'دلیل' }); if (why !== null) { await API.post('/api/lab/cancel/' + r.id, { reason: why }); toast('لغو شد'); go('lab-inbox'); } },
       saveRes: (b) => busy(b, async () => {
         if (b.dataset.st === 'approved' && !(await confirmDlg('نتایج تأیید و برای داکتر فرستاده شود؟'))) return;
-        r = await API.post('/api/lab/results/' + r.id, { results: view._collect(), status: b.dataset.st || undefined, report_note: $('#repNote', view).value });
-        toast(b.dataset.st === 'approved' ? 'تأیید شد و برای داکتر فرستاده شد' : 'ذخیره شد', 'good'); draw();
+        const col = view._collect();
+        const clean = col.every(x => !String(x.value).trim() || (!x.flag)) && !$$('[data-tid]', view).some(el => el.dataset.delta === '1' || el.dataset.alarm);
+        const crit = col.filter(x => x.flag === 'HH' || x.flag === 'LL');
+        r = await API.post('/api/lab/results/' + r.id, { results: col, status: b.dataset.st || undefined, report_note: $('#repNote', view).value });
+        let auto = false;
+        // auto-verification: completed results that are all normal (no flag, no alarm, no delta) are approved at once
+        if (b.dataset.st === 'completed' && App.settings.lab_autoverify === '1' && clean && col.some(x => String(x.value).trim())) { r = await API.post('/api/lab/results/' + r.id, { results: col, status: 'approved', report_note: $('#repNote', view).value }); auto = true; }
+        toast(auto ? 'همه نتایج نارمل بود — خودکار تأیید و برای داکتر فرستاده شد' : b.dataset.st === 'approved' ? 'تأیید شد و برای داکتر فرستاده شد' : 'ذخیره شد', 'good'); draw();
+        if (crit.length && ['completed', 'approved'].includes(b.dataset.st)) criticalCallDialog(r, crit.map(x => ({ ...x, test: (r.tests || []).find(t => t.id === x.test_id) })));
       }),
       reopen: async () => { r = await API.post('/api/lab/results/' + r.id, { results: [], status: 'received' }); draw(); },
       report: async () => { if (!['approved', 'delivered'].includes(r.status)) { r = await API.post('/api/lab/results/' + r.id, { results: view._collect(), report_note: $('#repNote', view).value }); } previewDoc(labReportHTML(r), { size: 'A4', title: r.lab_code, onPrinted: () => API.post('/api/lab/printed/' + r.id).catch(() => { }) }); },
@@ -415,6 +430,7 @@ Pages['lab-tests'] = {
         <label class="field"><span>نارمل پایین (عمومی)</span><input name="ref_low" type="number" step="any" value="${esc(t.ref_low ?? '')}"></label><label class="field"><span>نارمل بالا (عمومی)</span><input name="ref_high" type="number" step="any" value="${esc(t.ref_high ?? '')}"></label>
         <label class="field span2"><span>نارمل (متن، مثلاً Negative یا Up to 6)</span><input name="ref_text" class="en" value="${esc(t.ref_text || '')}"></label>
         <label class="field"><span>بحرانی پایین (عمومی)</span><input name="critical_low" type="number" step="any" value="${esc(t.critical_low ?? '')}"></label><label class="field"><span>بحرانی بالا (عمومی)</span><input name="critical_high" type="number" step="any" value="${esc(t.critical_high ?? '')}"></label>
+        <label class="field"><span>Delta check ٪ (تغییر زیاد از جواب قبلی؛ خالی = عمومی)</span><input name="delta_pct" type="number" step="any" value="${esc(t.delta_pct ?? '')}" placeholder="${esc(App.settings.lab_delta_pct || 50)}"></label>
         <label class="field"><span>کمترین مقدار ممکن</span><input name="possible_low" type="number" step="any" value="${esc(t.possible_low ?? '')}"></label><label class="field"><span>بیشترین مقدار ممکن</span><input name="possible_high" type="number" step="any" value="${esc(t.possible_high ?? '')}"></label>
         <label class="field span2"><span>گزینه‌ها (برای انتخابی، با کامه)</span><input id="ltOpts" class="en" value="${esc(JSON.parse(t.options || '[]').join(', '))}"></label>
         <label class="field span2"><span>فرمول (مثلاً {TCHOL}-{HDL}-{TG}/5)</span><input name="formula" class="ltr" value="${esc(t.formula || '')}"></label>

@@ -204,6 +204,33 @@ const r2 = (x) => Math.round(Number(x) * 100) / 100;
   const dd = await call(R, 'GET', `/api/reports/doctor-daily?from=${t}&to=${t}`); assert.ok(dd.length > 0 && dd[0].turns > 0); ok(`doctor daily turns: ${dd.map(x => x.name + ' ' + x.turns + ' (last ' + x.last_turn + ')').join(', ')}`);
   const settingsNow = srv.db.allSettings ? srv.db.allSettings() : Object.fromEntries(srv.db.all('SELECT key, value FROM settings').map(r => [r.key, r.value])); assert.ok(/1 \/ day/.test(settingsNow.rx_frequencies) && /selected dates/.test(settingsNow.rx_duration_units) && !/روزانه/.test(settingsNow.rx_frequencies)); ok('prescription lists are in English (1 / day …, selected dates)');
 
+  // ---- v1.4: staff, attendance, hourly leave, advance, payroll with carry-over
+  const stf = (await call(R, 'POST', '/api/staff/save', { name: 'کارمند آزمایشی', code: 'T1', salary: 30000, work_start: '08:00', work_end: '16:00', work_days: '0123456', hire_date: '2020-01-01' })).id;
+  const lastM = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); })();
+  const lmFrom = lastM + '-01', lmTo = (() => { const [y, m] = lastM.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); })();
+  await call(R, 'POST', '/api/staff/check', { staff_id: stf, action: 'absent', date: lmFrom });
+  const lv = await call(R, 'POST', '/api/staff/leave', { staff_id: stf, kind: 'hourly', date: lmTo, from_time: '07:00', to_time: '09:00', paid: 0 });
+  assert.equal(lv.minutes, 60); ok('hourly leave is clipped to the working time (60 minutes)');
+  await call(R, 'POST', '/api/staff/advance', { staff_id: stf, amount: 5000, month: lastM, source: 'reception' });
+  await call(R, 'POST', '/api/staff/payroll/save', { staff_id: stf, month: lastM, from: lmFrom, to: lmTo, bonus: 1000 });
+  const pr1 = (await call(R, 'GET', `/api/staff/payroll?month=${lastM}&from=${lmFrom}&to=${lmTo}`)).find(x => x.staff.id === stf).saved;
+  assert.equal(pr1.base, 30000); assert.equal(pr1.absent_days, 1); assert.equal(pr1.advances, 5000);
+  assert.equal(r2(pr1.deduction), r2(1000 + 60 * (1000 / 480))); assert.equal(r2(pr1.net), r2(30000 - pr1.deduction + 1000 - 5000));
+  ok(`payroll: base ${pr1.base} − deduction ${pr1.deduction} + bonus 1000 − advance 5000 = ${pr1.net}`);
+  await call(R, 'POST', '/api/staff/payroll/pay', { payroll_id: pr1.id, amount: 20000, source: '' });
+  const cm = new Date().toISOString().slice(0, 7);
+  const pr2 = (await call(A, 'GET', `/api/staff/payroll?month=${cm}&from=${cm}-01&to=${t}`)).find(x => x.staff.id === stf).calc;
+  assert.equal(r2(pr2.carry_in), r2(pr1.net - 20000)); ok(`remaining of last month carried in: ${pr2.carry_in}`);
+  await assert.rejects(call(P, 'GET', '/api/staff'), /دسترسی|اجازه|access/i); ok('pharmacy cannot open the staff pages');
+  // ---- v1.4: lab QC Westgard and verification key
+  const tst = (await call(L, 'GET', '/api/lab/catalog')).tests.find(x => x.result_type === 'numeric' && !x.is_panel);
+  await call(L, 'POST', '/api/lab/qc/material', { test_id: tst.id, name: 'Ctrl', level: 'Normal', mean: 100, sd: 5 });
+  const mat = (await call(L, 'GET', '/api/lab/qc'))[0];
+  assert.equal((await call(L, 'POST', '/api/lab/qc/result', { material_id: mat.id, value: 102 })).rule, null);
+  assert.equal((await call(L, 'POST', '/api/lab/qc/result', { material_id: mat.id, value: 117 })).rule, '1-3s'); ok('Westgard 1-3s rejects a control 3.4 SD away');
+  const vr = await call(A, 'GET', '/api/verify?q=' + encodeURIComponent(walk.lab_code + ' ' + (await call(L, 'GET', '/api/lab/verify-key/' + walk.lab_code))));
+  assert.equal(vr.found, true); assert.equal(vr.key_ok, true); ok('report verification key');
+
   // excel import
   const xl = process.argv[2];
   if (xl && fs.existsSync(xl)) {
