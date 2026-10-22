@@ -27,6 +27,8 @@ flowchart TB
 
 Every station has light / dark / automatic mode and its own colour (Admin → settings → station colours, or *this computer*).
 
+**v1.4.1** — dark mode with the new look: page, menu, top bar, tables and coloured text now all follow the dark palette (no more light page with dark cards).
+
 **New in v1.4**
 - **Staff (reception and admin, own menu group)**: employees with code, position, section, monthly salary, working hours and working days; **attendance** with one-click check in / out (exact time, late and early minutes with a grace time), absent, edit, and **import from an attendance device** (CSV / text: code, date-time); **hourly leave during working time** (exact from–to, clipped to the working hours, paid or unpaid) and daily / sick / annual leave; **advances taken from the salary** (also recorded as a withdrawal of the reception / pharmacy / lab cash); **monthly payroll** = salary − (absent days + unpaid leave [+ late, optional]) + bonus − advances + **remaining of the previous month**, partial payments, pay slip, monthly attendance and leave reports.
 - **WhatsApp reminders**: reservations, next visits, children's vaccines, ready lab results and patients who did not come back — ready message templates (editable), one click opens WhatsApp, sent marks.
