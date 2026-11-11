@@ -11,6 +11,7 @@ const NAV = [
   ['setup', 'داکتران، خدمات و فیس', 'steth', ['admin'], 'admin'],
   ['settings', 'تنظیمات و سرخط نسخه', 'settings', ['admin'], 'admin'],
   ['headers', 'سربرگ نسخه، راپور و رسید', 'file', ['doctor', 'lab', 'pharmacy', 'reception'], 'admin'],
+  ['features', 'قابلیت‌ها و بخش‌ها (روشن / خاموش)', 'eye', ['admin'], 'admin'],
   ['audit', 'گزارش فعالیت‌ها', 'audit', ['admin'], 'admin'],
   ['backup', 'پشتیبان دیتابیس', 'database', ['admin'], 'admin'],
 
@@ -82,14 +83,20 @@ const NAV = [
 
   ['local', 'تنظیمات این کمپیوتر', 'settings', ALL_ROLES, 'local']
 ];
+// short names for the menu (the full name is the tooltip and the page title)
+const NAV_SHORT = { visits: 'صف امروز و پذیرش‌ها', cashier: 'صندوق مرکزی', 'rc-cash': 'حسابات روز و صندوق', 'dr-daily': 'آمار داکتران و نوبت‌ها', 'lab-reports': 'آمار مراجعین و درآمد', 'adm-pharmacy': 'دواخانه (خلاصه)', 'adm-lab': 'لابراتوار (خلاصه)', 'month-account': 'حساب ماهوار', features: 'قابلیت‌ها و بخش‌ها', headers: 'سربرگ‌ها', reminders: 'یادآوری مریضان', 'rc-wd': 'برداشت لابراتوار و پذیرش' };
 const NAV_GROUPS = { admin: 'مدیریت', staff: 'کارمندان، حاضری و معاشات', stock: 'انبار و حسابات', reception: 'پذیرش', doctor: 'داکتر', pharmacy: 'دواخانه', lab: 'لابراتوار', local: '' };
 const HOME = { admin: 'admin-dash', stock: 'stock-dash', reception: 'reception', doctor: 'dr-queue', pharmacy: 'rx-inbox', lab: 'lab-inbox' };
 // users marked «no finance» do not see profit / monthly money reports
 const FINANCE_PAGES = ['monthly', 'month-account', 'compare', 'med-sales', 'rc-month', 'ph-month'];
+// the section this program shows: a station program (reception, laboratory…) shows only its own section,
+// even when the admin is allowed to log in there; the admin panel exists only in the admin program / browser.
+const viewRole = () => { const r = App.user?.role; return (r === 'admin' && App.station && App.station !== 'admin' && STATIONS[App.station]) ? App.station : r; };
 const canSee = (page) => {
+  if (App.peek === page && App.user?.role === 'admin') return true;   // the admin arranging a page of another station
   if (App.user?.no_finance && FINANCE_PAGES.includes(page)) return false;
-  if (App.user && NavCfg.hidden(App.user.role, page)) return false;   // switched off in Settings → menus
-  const ns = NAV.filter(x => x[0] === page); return !ns.length || App.user?.role === 'admin' || ns.some(n => n[3].includes(App.user?.role));
+  if (App.user && NavCfg.hidden(viewRole(), page)) return false;   // switched off in Settings → menus
+  const ns = NAV.filter(x => x[0] === page); return !ns.length || viewRole() === 'admin' || ns.some(n => n[3].includes(viewRole()));
 };
 const isRole = (...r) => App.user && (App.user.role === 'admin' || r.includes(App.user.role));
 
@@ -120,13 +127,13 @@ function applyBranding() {
 }
 
 function renderNav() {
-  const role = App.user.role;
+  const role = viewRole();
   const items = NavCfg.items(role).filter(n => !(App.user.no_finance && FINANCE_PAGES.includes(n[0])));
   let lastGroup = null, html = '';
   for (const n of items) {
     const g = role === 'admin' ? n[4] : (n[4] === 'local' ? 'local' : n[4] === 'staff' ? 'staff' : role);
     if (g !== lastGroup) { if (NAV_GROUPS[g] && (role === 'admin' || g === 'local' || g === 'staff')) html += `<div class="navGroup">${NAV_GROUPS[g]}</div>`; else if (g === 'local') html += '<div class="navGroup"></div>'; lastGroup = g; }
-    html += `<button class="navItem" data-page="${n[0]}">${icon(n[2])}<span>${n[1]}</span><span class="cnt hidden" data-cnt="${n[0]}"></span></button>`;
+    html += `<button class="navItem" data-page="${n[0]}" title="${n[1]}">${icon(n[2])}<span class="navLbl">${NAV_SHORT[n[0]] || n[1]}</span><span class="cnt hidden" data-cnt="${n[0]}"></span></button>`;
   }
   const st = STATIONS[App.station] || null;
   html += `<div class="sideFoot">${st ? `ایستگاه: <b>${esc(st.name)}</b><br>` : ''}سرور: <span class="ltr">${esc((App.server?.addresses || [location.hostname])[0] || '')}:${esc(App.server?.port || location.port)}</span><br>نسخه ${esc(App.server?.version || '')}<br><span class="small">F5 بارگذاری مجدد · Ctrl+K جستجو</span></div>`;
@@ -135,7 +142,8 @@ function renderNav() {
 }
 
 async function go(page, params = {}) {
-  if (!Pages[page] || !canSee(page)) { page = HOME[App.user.role] || 'local'; if (!canSee(page)) page = (NavCfg.items(App.user.role)[0] || ['local'])[0]; }
+  if (!Pages[page] || !canSee(page)) { page = HOME[viewRole()] || 'local'; if (!canSee(page)) page = (NavCfg.items(viewRole())[0] || ['local'])[0]; }
+  if (App.peek && App.peek !== page) App.peek = null;
   App.page = page; App.params = params;
   $$('#sidebar .navItem').forEach(b => b.classList.toggle('on', b.dataset.page === page));
   destroyCharts();
@@ -174,9 +182,11 @@ async function startSession() {
   renderNav();
   // admin: arrange the tabs / cards / charts of the open page
   $('#layoutBtn')?.remove();
-  if (u.role === 'admin') { const lb = document.createElement('button'); lb.className = 'topBtn'; lb.id = 'layoutBtn'; lb.title = 'چیدمان این صفحه (پنهان / جابجا کردن تب‌ها، بخش‌ها و چارت‌ها)'; lb.innerHTML = icon('edit', 16); lb.onclick = () => Layout.toggleEdit(); $('#themeBtn').before(lb); }
+  if (viewRole() === 'admin') { const lb = document.createElement('button'); lb.className = 'topBtn'; lb.id = 'layoutBtn'; lb.title = 'چیدمان این صفحه (پنهان / جابجا کردن تب‌ها، بخش‌ها و چارت‌ها)'; lb.innerHTML = icon('edit', 16); lb.onclick = () => Layout.toggleEdit(); $('#themeBtn').before(lb); }
   connectEvents();
-  go(HOME[u.role] || 'local');
+  document.documentElement.dataset.view = viewRole();
+  if (typeof V16 !== 'undefined') V16.start();
+  go(HOME[viewRole()] || 'local');
   if (u.must_change) setTimeout(() => changePasswordDlg(true), 400);
   try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch (_) { }
 }
@@ -292,6 +302,8 @@ const globalSearch = debounce(async () => {
   const q = $('#globalSearch').value.trim(); const box = $('#globalResults');
   if (q.length < 2) { box.classList.add('hidden'); return; }
   const role = App.user.role; const out = [];
+  const ql = q.toLowerCase();
+  NavCfg.items(viewRole()).filter(n => n[1].toLowerCase().includes(ql) || (NAV_SHORT[n[0]] || '').includes(ql)).slice(0, 6).forEach(n => out.push({ code: 'صفحه', text: `${icon(n[2], 14)} ${esc(n[1])}`, go: () => go(n[0]) }));
   try {
     const up = q.toUpperCase();
     if (/^(RX|R)?-?\d+$/.test(up) && isRole('pharmacy', 'doctor')) {
@@ -351,7 +363,7 @@ function tickClock() { const d = new Date(); $('#clock').textContent = `${WEEKDA
     App.firstRun = ping.first_run;
   } catch (e) { $('#loginErr').textContent = e.message; }
   if (API.token) {
-    try { App.user = await API.get('/api/me'); if (App.station && App.user.station !== App.station && App.user.role !== 'admin' && App.user.role !== App.station) throw new Error('station'); return await startSession(); }
+    try { App.user = await API.get('/api/me'); if (App.station && App.user.station !== App.station) throw new Error('station'); return await startSession(); }
     catch (_) { API.setToken(''); App.user = null; }
   }
   if (App.firstRun) $('#loginHint').innerHTML = 'ورود اول: کاربر <b>admin</b> و رمز <b>1234</b>';

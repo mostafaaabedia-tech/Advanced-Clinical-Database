@@ -25,7 +25,7 @@ const NAV_DEFAULT_HIDDEN = {
   stock: ['verify']
 };
 // pages that can never be switched off (otherwise nobody could switch them on again)
-const NAV_LOCKED = { admin: ['settings', 'local'], _all: ['local'] };
+const NAV_LOCKED = { admin: ['settings', 'local', 'features'], _all: ['local'] };
 
 const NavCfg = {
   all() { try { return JSON.parse(App.settings.nav_config || '{}') || {}; } catch (_) { return {}; } },
@@ -58,11 +58,12 @@ const Layout = {
     if (el.matches('.tabs > button')) k = 'tab:' + (el.dataset.t || el.dataset.h || el.dataset.tab || clean(el.textContent));
     else if (el.matches('.kpi')) k = 'kpi:' + clean($('.lbl', el)?.textContent);
     else if (el.matches('.card')) { const h = $(':scope > h2, :scope > .cardHead h2', el); k = 'card:' + (el.id || clean(h?.textContent) || ''); if (k === 'card:') k = null; }
+    else if (el.matches('.btn')) { k = 'btn:' + (el.dataset.act || clean(el.textContent)); if (k === 'btn:') k = null; }
     if (k) el.dataset.lyKey = k;
     return k;
   },
   items(root) {
-    return $$('.tabs > button, .kpi, .card', root).filter(el => !el.closest('#modals') && !el.closest('.lyBar') && this.keyOf(el));
+    return $$('.tabs > button, .kpi, .card, .pageHead .btn, .bar > .btn', root).filter(el => !el.closest('#modals') && !el.closest('.lyBar') && this.keyOf(el));
   },
   attach(view, page) {
     this.page = page; this.view = view; this._draft = null;
@@ -135,9 +136,9 @@ const Layout = {
       const c = this.cfg(this.page);
       for (const el of this.items(this.view)) {
         if ($(':scope > .lyTools', el)) continue;
-        const k = this.keyOf(el), isTab = el.matches('.tabs > button'), chart = el.matches('.card') && $('canvas', el);
+        const k = this.keyOf(el), isTab = el.matches('.tabs > button'), isBtn = el.matches('.btn'), chart = el.matches('.card') && $('canvas', el);
         const t = document.createElement('span'); t.className = 'lyTools';
-        t.innerHTML = `<i data-lyt="hide" title="پنهان / نمایان">${c.hide.includes(k) ? '🚫' : '👁'}</i><i data-lyt="up" title="${isTab ? 'قبل' : 'بالا / قبل'}">${isTab ? '▶' : '▲'}</i><i data-lyt="down" title="${isTab ? 'بعد' : 'پایین / بعد'}">${isTab ? '◀' : '▼'}</i>${chart ? `<i data-lyt="chart" title="نوع چارت: ستونی / خطی">📊</i>` : ''}`;
+        t.innerHTML = isBtn ? `<i data-lyt="hide" title="پنهان / نمایان کردن این دکمه">${c.hide.includes(k) ? '🚫' : '👁'}</i>` : `<i data-lyt="hide" title="پنهان / نمایان">${c.hide.includes(k) ? '🚫' : '👁'}</i><i data-lyt="up" title="${isTab ? 'قبل' : 'بالا / قبل'}">${isTab ? '▶' : '▲'}</i><i data-lyt="down" title="${isTab ? 'بعد' : 'پایین / بعد'}">${isTab ? '◀' : '▼'}</i>${chart ? `<i data-lyt="chart" title="نوع چارت: ستونی / خطی">📊</i>` : ''}`;
         el.appendChild(t);
       }
     } finally { this.busy = false; }
@@ -182,7 +183,7 @@ function bindNavSettings(root) {
     const items = NavCfg.items(role, true); App.settings.nav_config = tmp;
     let last = null;
     $('#navList', root).innerHTML = items.map((n, i) => { const g = n[4]; const head = role === 'admin' && g !== last ? `<div class="navCfgGroup">${esc(NAV_GROUPS[g] || 'عمومی')}</div>` : ''; last = g; const lk = NavCfg.locked(role, n[0]);
-      return `${head}<div class="navCfgRow ${c.hidden.includes(n[0]) && !lk ? 'off' : ''}" data-p="${n[0]}"><label class="check"><input type="checkbox" data-vis ${c.hidden.includes(n[0]) && !lk ? '' : 'checked'} ${lk ? 'disabled' : ''}> ${icon(n[2], 15)} ${esc(n[1])}</label><span class="grow"></span><button type="button" class="btn ghost icon sm" data-mv="-1" title="بالا">▲</button><button type="button" class="btn ghost icon sm" data-mv="1" title="پایین">▼</button></div>`; }).join('');
+      return `${head}<div class="navCfgRow ${c.hidden.includes(n[0]) && !lk ? 'off' : ''}" data-p="${n[0]}"><label class="check"><input type="checkbox" data-vis ${c.hidden.includes(n[0]) && !lk ? '' : 'checked'} ${lk ? 'disabled' : ''}> ${icon(n[2], 15)} ${esc(n[1])}</label><span class="grow"></span><button type="button" class="btn ghost sm" data-peek title="باز کردن این صفحه برای پنهان / جابجا کردن تب‌ها، دکمه‌ها و بخش‌های داخل آن">${icon('edit', 13)} داخل صفحه</button><button type="button" class="btn ghost icon sm" data-mv="-1" title="بالا">▲</button><button type="button" class="btn ghost icon sm" data-mv="1" title="پایین">▼</button></div>`; }).join('');
   };
   $('#navRoles', root).onclick = (e) => { const b = e.target.closest('[data-role]'); if (!b) return; role = b.dataset.role; $$('#navRoles .chip', root).forEach(x => x.classList.toggle('on', x === b)); draw(); };
   $('#navList', root).addEventListener('change', (e) => { const cb = e.target.closest('[data-vis]'); if (!cb) return; const p = cb.closest('[data-p]').dataset.p, c = cur(); c.hidden = c.hidden.filter(x => x !== p); if (!cb.checked) c.hidden.push(p); cb.closest('.navCfgRow').classList.toggle('off', !cb.checked); save(); });
@@ -195,11 +196,17 @@ function bindNavSettings(root) {
   // hidden tabs / cards of the pages
   const lyDraw = () => {
     const all = Layout.all(); const rows = Object.entries(all).flatMap(([pg, c]) => (c.hide || []).map(k => [pg, k]));
-    $('#lyHiddenList', root).innerHTML = rows.length ? `<table class="t"><thead><tr><th>صفحه</th><th>تب / بخش</th><th></th></tr></thead><tbody>${rows.map(([pg, k]) => `<tr><td>${esc((NAV.find(n => n[0] === pg) || [])[1] || pg)}</td><td>${esc(k.replace(/^(tab|card|kpi):/, (m, t) => ({ tab: 'تب: ', card: 'بخش: ', kpi: 'عدد: ' })[t]))}</td><td><button type="button" class="btn sm" data-lyshow="${esc(pg)}|${esc(k)}">${icon('eye', 13)} نمایش دوباره</button></td></tr>`).join('')}</tbody></table>` : '<div class="muted small">هیچ تب یا بخشی پنهان نشده.</div>';
+    $('#lyHiddenList', root).innerHTML = rows.length ? `<table class="t"><thead><tr><th>صفحه</th><th>تب / بخش</th><th></th></tr></thead><tbody>${rows.map(([pg, k]) => `<tr><td>${esc((NAV.find(n => n[0] === pg) || [])[1] || pg)}</td><td>${esc(k.replace(/^(tab|card|kpi|btn):/, (m, t) => ({ tab: 'تب: ', card: 'بخش: ', kpi: 'عدد: ', btn: 'دکمه: ' })[t]))}</td><td><button type="button" class="btn sm" data-lyshow="${esc(pg)}|${esc(k)}">${icon('eye', 13)} نمایش دوباره</button></td></tr>`).join('')}</tbody></table>` : '<div class="muted small">هیچ تب یا بخشی پنهان نشده.</div>';
   };
   root.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-lyshow]'); if (!b) return; const [pg, k] = b.dataset.lyshow.split('|'); const all = Layout.all(); if (all[pg]) all[pg].hide = (all[pg].hide || []).filter(x => x !== k);
     try { await API.post('/api/settings', { page_layout: JSON.stringify(all) }); App.settings.page_layout = JSON.stringify(all); lyDraw(); toast('دوباره نمایان شد', 'good'); } catch (err) { errToast(err); }
+  });
+  // open a page (of any station) in arrange mode: hide / show its tabs, buttons, cards and charts
+  $('#navList', root).addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-peek]'); if (!b) return; const p = b.closest('[data-p]').dataset.p;
+    if (!Pages[p]) return toast('این صفحه باز نمی‌شود', 'bad');
+    App.peek = p; await go(p); if (!Layout.edit) Layout.toggleEdit();
   });
   draw(); lyDraw();
 }

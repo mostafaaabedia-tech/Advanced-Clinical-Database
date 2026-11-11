@@ -81,7 +81,7 @@ with sync_playwright() as p:
   ok('اول دوره' in lb.evaluate("document.querySelector('#uB').innerText"), 'monthly material report with start and end')
   shot(lb, 'f7-03-material-report')
   lb.evaluate("document.querySelectorAll('#modals .modalBack').forEach(m => m.remove())")
-  api(lb, "const it = (await API.list('lab_items', { limit: 5 }))[0]; await API.post('/api/lab/items/move', { item_id: it.id, kind: 'adjust', qty: -(it.stock - 1) }); return 1")
+  api(lb, "const it = (await API.list('lab_items', { limit: 5 }))[0]; if (it.stock > 1) await API.post('/api/lab/items/move', { item_id: it.id, kind: 'adjust', qty: -(it.stock - 1) }); return 1")
   lb.evaluate("go('lab-inbox')"); lb.wait_for_timeout(1200)
   ok(lb.query_selector('#lLow .warnBox') is not None, 'low materials warning on the lab inbox')
   shot(lb, 'f7-04-low-warning')

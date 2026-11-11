@@ -74,7 +74,7 @@ const DEFAULT_SETTINGS = {
   staff_grace_min: '10', staff_late_deduct: '0', staff_hourly_paid: '0',
   lab_delta_pct: '50', lab_autoverify: '0', lab_report_qr: '0', restrict_finance: '0',
   // v1.5
-  lab_delta_on: '0', lab_critical_dialog: '0', low_stock_alert: '3', station_lock_admin: '1', nav_config: '', page_layout: '',
+  lab_delta_on: '0', lab_critical_dialog: '0', low_stock_alert: '3', station_lock_admin: '1', nav_config: '', page_layout: '', idle_logout_min: '0', dash_hero: '1',
   expense_categories: LIST('معاش کارمندان', 'بل برق', 'انترنت / وایفای', 'کرایه', 'قرطاسیه', 'نظافت', 'مواد سونوگرافی', 'مواد مصرفی', 'ترانسپورت', 'ترمیمات', 'شخصی', 'برگشتی', 'سایر'),
   medicine_categories: LIST('انتی بیوتیک', 'مسکن و ضد التهاب', 'ویتامین و مکمل', 'گوارشی', 'تنفسی و حساسیت', 'قلبی و فشار خون', 'دیابت', 'زنانه و ولادی', 'اطفال', 'سیروم و پیچکاری', 'پوستی', 'چشم و گوش', 'عصبی', 'سایر'),
   medicine_units: LIST('عدد', 'تابلیت', 'کپسول', 'بوتل', 'ورق', 'قطی', 'امپول', 'ویال', 'تیوب', 'ساشه', 'بسته'),

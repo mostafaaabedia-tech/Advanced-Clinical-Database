@@ -1,0 +1,84 @@
+/* v1.6: fixes found by the UI audit, the functions page, narrow menu and the admin panel look */
+
+/* ---- menu: one line per item, never broken in two */
+.navItem .navLbl { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.navItem .cnt { flex: 0 0 auto; }
+.navGroup.canFold { cursor: pointer; user-select: none; display: flex; align-items: center; justify-content: space-between; }
+.navGroup.canFold::after { content: '▾'; font-size: 11px; opacity: .6; transition: transform .15s; }
+.navGroup.folded::after { transform: rotate(90deg); }
+.navItem.navFolded { display: none; }
+
+/* ---- narrow menu (icons only) */
+#navToggle { margin-inline-end: 6px; flex: 0 0 auto; }
+html.navMini #app { grid-template-columns: 68px 1fr !important; }
+html.navMini #sidebar { padding-inline: 8px !important; overflow-x: hidden; }
+html.navMini .navItem { justify-content: center; padding-inline: 0 !important; position: relative; }
+html.navMini .navItem .navLbl, html.navMini .sideFoot, html.navMini .navGroup { display: none !important; }
+html.navMini .navItem.navFolded { display: flex; }
+html.navMini .navItem .cnt { position: absolute; top: 2px; left: 4px; font-size: 10px !important; padding: 0 5px !important; margin: 0; }
+html.navMini #topbar .brand > div:last-child { display: none; }
+html.navMini #topbar .brand { min-width: 0; }
+
+/* ---- small fixes */
+.codeTag, td.codeTag { white-space: nowrap; }
+#abM { overflow-x: auto; }
+#globalSearch { text-overflow: ellipsis; }
+@media (max-width: 1500px) { .grid.g-21:has(.maSum) { grid-template-columns: 1fr; } }
+.noData { position: relative; }
+.noData::after { content: 'هنوز داده‌ای برای نمایش نیست'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; background: var(--surface); border-radius: 10px; pointer-events: none; }
+
+/* ---- layout editor: buttons too */
+html.lyEdit .pageHead .btn, html.lyEdit .bar > .btn { position: relative; outline: 1px dashed var(--line-2); outline-offset: 2px; overflow: visible; }
+html.lyEdit .btn.lyHidden { display: inline-flex !important; }
+.btn > .lyTools { top: -14px; left: -4px; }
+.btn > .lyTools i { color: var(--text); }
+
+/* ---- functions page */
+.featGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; align-items: start; margin-top: 14px; }
+.swRow { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 2px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.swRow:last-child { border-bottom: 0; }
+.swRow > span { min-width: 0; }
+.swRow b { display: block; font-weight: 600; }
+.swRow small { display: block; color: var(--muted); font-size: 12px; line-height: 1.7; margin-top: 2px; }
+.swRow .numIn { width: 84px; flex: 0 0 auto; text-align: center; }
+input.sw { appearance: none; -webkit-appearance: none; flex: 0 0 auto; width: 46px; height: 26px; border-radius: 26px; background: var(--line-2); position: relative; cursor: pointer; transition: background-color .18s; margin: 0; border: 0; }
+input.sw::after { content: ''; position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.3); transition: transform .18s; }
+input.sw:checked { background: var(--good, #0a8a5c); }
+input.sw:checked::after { transform: translateX(-20px); }
+input.sw:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* ---- admin panel: dark side menu, coloured dashboard header */
+html[data-view="admin"] #sidebar, html[data-view="admin"][data-ui="simple"] #sidebar, html[data-view="admin"][data-theme="dark"][data-ui="simple"] #sidebar { background: linear-gradient(180deg, #0f2440, #0b1a30) !important; border-color: #0b1a30 !important; }
+html[data-view="admin"] #sidebar .navItem { color: #cfdcee !important; }
+html[data-view="admin"] #sidebar .navItem svg { color: #8fb4e6 !important; }
+html[data-view="admin"] #sidebar .navItem:not(.on):hover { background: rgba(255,255,255,.08) !important; color: #fff !important; }
+html[data-view="admin"] #sidebar .navItem.on { background: linear-gradient(90deg, #2a7de1, #1b5fb8) !important; color: #fff !important; box-shadow: 0 6px 16px rgba(27,95,184,.45); }
+html[data-view="admin"] #sidebar .navItem.on svg { color: #fff !important; }
+html[data-view="admin"] #sidebar .navGroup { color: #7f9cc4 !important; border-color: rgba(255,255,255,.09) !important; font-size: 11.5px !important; letter-spacing: .3px; }
+html[data-view="admin"] #sidebar .sideFoot { color: #7f9cc4; border-color: rgba(255,255,255,.09); }
+html[data-view="admin"] #sidebar .sideFoot b { color: #dbe7f7; }
+html[data-view="admin"] #sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,.18); }
+
+.admHeadHidden { display: none !important; }
+.admHero { display: flex; align-items: stretch; justify-content: space-between; gap: 20px; flex-wrap: wrap; padding: 22px 26px; border-radius: 18px; color: #fff; background: linear-gradient(120deg, #0f2440 0%, #1b5fb8 60%, #2a8de1 100%); box-shadow: 0 14px 34px rgba(15,36,64,.28); position: relative; overflow: hidden; }
+.admHero::before { content: ''; position: absolute; width: 320px; height: 320px; border-radius: 50%; background: rgba(255,255,255,.07); left: -90px; top: -150px; }
+.admHero::after { content: ''; position: absolute; width: 200px; height: 200px; border-radius: 50%; background: rgba(255,255,255,.06); left: 120px; bottom: -130px; }
+.admHi { position: relative; z-index: 1; min-width: 0; }
+.admHi small { font-size: 13px; opacity: .85; }
+.admHi h1 { margin: 4px 0 4px; font-size: 26px; color: #fff; }
+.admHi p { margin: 0; opacity: .85; font-size: 13px; color: #fff; }
+.admSt { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.admSt span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 10px; border-radius: 20px; background: rgba(255,255,255,.12); color: rgba(255,255,255,.75); }
+.admSt span i { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.4); }
+.admSt span.on { color: #fff; background: rgba(255,255,255,.2); }
+.admSt span.on i { background: #4ade80; box-shadow: 0 0 0 3px rgba(74,222,128,.3); }
+.admQuick { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, minmax(86px, 1fr)); gap: 8px; align-content: center; }
+.admQuick button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 8px; border-radius: 12px; border: 1px solid rgba(255,255,255,.22); background: rgba(255,255,255,.12); color: #fff; cursor: pointer; font-size: 12.5px; font-family: inherit; transition: background-color .15s, transform .12s; }
+.admQuick button:hover { background: rgba(255,255,255,.24); transform: translateY(-2px); }
+.admSec { margin: 22px 2px 10px; font-weight: 700; font-size: 14px; color: var(--text-2); display: flex; align-items: center; gap: 10px; }
+.admSec::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.admSec + .grid { margin-top: 0 !important; }
+html[data-view="admin"] #view .kpi { border-radius: 16px; }
+@media (max-width: 1100px) { .admQuick { grid-template-columns: repeat(6, 1fr); width: 100%; } }
+@media print { .admHero, #navToggle { display: none !important; } }
+html.lyEdit .tabs { overflow: visible !important; padding-top: 16px; flex-wrap: wrap; }

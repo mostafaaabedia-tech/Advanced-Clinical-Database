@@ -27,6 +27,14 @@ flowchart TB
 
 Every station has light / dark / automatic mode and its own colour (Admin → settings → station colours, or *this computer*).
 
+**New in v1.6**
+
+- Every station is its own program: the admin panel exists only in the Admin program. With the admin name and password the other programs do not open (default); if that is allowed in Settings, the admin sees only that station's section there. A login is never carried from one station program to another.
+- New page "قابلیت‌ها و بخش‌ها" (functions and sections): switches for the functions of the program, the pages of every station on / off and in order, and "داخل صفحه" opens any page of any station so its tabs, buttons, number boxes, cards and charts can be hidden, shown or moved.
+- Admin panel: dark side menu with folding groups, dashboard header with greeting, date, online stations and shortcuts, titled groups of numbers.
+- Narrow menu (icons only), Ctrl+K also finds pages of the menu, automatic lock after being idle, an empty chart says so.
+- UI audit (`scripts/ui_audit.py`): every page and tab of every station at two window sizes, light and dark — sideways overflow, clipped texts, low contrast and script errors. Fixed: menu names broken in two lines, patient codes broken in two lines, ABC matrix outside its card, month account summary squeezing its table, clipped search hint.
+
 **New in v1.5**
 - **Menus and sections can be switched off / on** for every station in *Settings → منوها و بخش‌ها* (a page that is off disappears from that station's menu and cannot be opened; switch it on again there) and the menu order can be changed. The admin menu is smaller by default (laboratory: one summary page; pharmacy: sales lists and accounts, no selling; reception: central cashier, daily accounts, all withdrawals and monthly accounts).
 - **Arrange a page** (admin, ✎ button at the top): hide / show and move tabs, cards and number boxes, switch a chart between bars and lines — for all computers; hidden parts are listed in Settings and can be shown again.

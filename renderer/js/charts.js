@@ -52,6 +52,8 @@ function barChart(canvas, labels, datasets, { stacked = false, money: isMoney = 
       onClick: onClick ? (e, els) => { if (els[0]) onClick(els[0].index); } : undefined
     }
   });
+  // an empty chart says so instead of showing an empty grid
+  try { canvas.parentElement.classList.toggle('noData', !datasets.some(d => (d.data || []).some(v => Number(v)))); } catch (_) { }
   App.charts.push(c); return c;
 }
 
